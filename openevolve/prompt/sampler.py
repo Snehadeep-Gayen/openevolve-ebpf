@@ -580,8 +580,8 @@ class PromptSampler:
         # Process all artifacts using .items()
         for key, value in artifacts.items():
             content = self._safe_decode_artifact(value)
-            # Truncate if too long
-            if len(content) > self.config.max_artifact_bytes:
+            # Truncate if too long, unless the key is 'perf_expl'
+            if key != "perf_expl" and len(content) > self.config.max_artifact_bytes:
                 content = content[: self.config.max_artifact_bytes] + "\n... (truncated)"
 
             sections.append(f"### {key}\n```\n{content}\n```")

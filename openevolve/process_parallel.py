@@ -3,10 +3,12 @@ Process-based parallel controller for true parallelism
 """
 
 import asyncio
+import json
 import logging
 import multiprocessing as mp
 import pickle
 import signal
+import subprocess
 import time
 from concurrent.futures import ProcessPoolExecutor, Future, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, asdict
@@ -385,6 +387,106 @@ class ProcessParallelController:
 
         return snapshot
 
+
+    def _call_codex_evaluation(self, program: Program, artifacts: Dict[str, Any]) -> Dict[str, Any]:
+        """Call the codex evaluation context/explanation API"""
+        metrics = getattr(program, "metrics", None)
+        if not isinstance(metrics, dict):
+            return None
+
+        run_success = metrics.get("run_success")
+        if run_success != 1:
+            return None
+
+        code = program.code
+        log_metric: List[Tuple[str, str]] = []
+        if isinstance(artifacts, dict):
+            logs_payload = artifacts.get("logs") or artifacts.get("log_files")
+            if isinstance(logs_payload, dict):
+                log_metric = [
+                    (name, path)
+                    for name, path in logs_payload.items()
+                    if isinstance(name, str) and isinstance(path, str)
+                ]
+            elif isinstance(logs_payload, list):
+                for entry in logs_payload:
+                    if (
+                        isinstance(entry, dict)
+                        and isinstance(entry.get("name"), str)
+                        and isinstance(entry.get("path"), str)
+                    ):
+                        log_metric.append((entry["name"], entry["path"]))
+
+        code_summary = getattr(self, "code_summary", None)
+        if code_summary is None:
+            code_summary = getattr(self.config, "code_summary", None)
+
+        eval_agent_prompt = getattr(self.config, "eval_agent_prompt", None)
+        if eval_agent_prompt is None and hasattr(self.config, "prompt"):
+            eval_agent_prompt = getattr(self.config.prompt, "eval_agent_prompt", None)
+
+        parent_program = self.database.get(program.parent_id) if program.parent_id else None
+        parent_metrics = parent_program.metrics if parent_program else None
+        parent_perf_expl = None
+        if parent_program:
+            parent_artifacts = self.database.get_artifacts(parent_program.id)
+            if isinstance(parent_artifacts, dict):
+                parent_perf_expl = parent_artifacts.get("perf_expl")
+
+        codex_payload = {
+            "eval_agent_prompt": eval_agent_prompt,
+            "code": code,
+            "metrics": metrics,
+            "log_metric": log_metric,
+            "parent_program": parent_program.to_dict() if parent_program else None,
+            "parent_metrics": parent_metrics,
+            "parent_perf_expl": parent_perf_expl,
+            "code_summary": code_summary,
+            #"artifacts": artifacts,
+        }
+
+        codex_payload_str = json.dumps(codex_payload, ensure_ascii=False)
+
+        print("Starting Codex evaluation...")
+
+        try:
+            import time
+            start_time = time.time()
+            result = subprocess.run(
+                [
+                    "codex",
+                    "exec",
+                    "--full-auto",
+                    "--model",
+                    "gpt-5-codex",
+                    "--config",
+                    "model_reasoning_effort=medium",
+                    "--",
+                    codex_payload_str,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            elapsed = time.time() - start_time
+            print(f"Codex evaluation took {elapsed:.3f} seconds")
+            codex_response = result.stdout.strip()
+            if result.returncode != 0:
+                logger.warning(
+                    "Codex evaluation command failed (exit %s): %s",
+                    result.returncode,
+                    result.stderr.strip(),
+                )
+        except Exception as exc:
+            logger.error("Codex evaluation command raised an exception: %s", exc)
+            codex_response = None
+
+        return {
+            #"payload": codex_payload_str,
+            "payload_dict": codex_payload,
+            "response": codex_response,
+        }
+
     async def run_evolution(
         self,
         start_iteration: int,
@@ -477,6 +579,15 @@ class ProcessParallelController:
                     # No need to specify target_island - database will handle parent island inheritance
                     self.database.add(child_program, iteration=completed_iteration)
 
+                    # TODO: Add in the codex evaluation context/explanation call here. 
+                    codex_evaluation = self._call_codex_evaluation(child_program, result.artifacts)
+
+                    # Persist performance explanation returned by Codex in artifacts
+                    if codex_evaluation and codex_evaluation.get("response"):
+                        if not result.artifacts:
+                            result.artifacts = {}
+                        result.artifacts["perf_expl"] = codex_evaluation["response"]
+
                     # Store artifacts
                     if result.artifacts:
                         self.database.store_artifacts(child_program.id, result.artifacts)
@@ -489,6 +600,16 @@ class ProcessParallelController:
                             # Determine island ID
                             island_id = child_program.metadata.get("island", self.database.current_island)
                             
+                            trace_metadata = {
+                                "iteration_time": result.iteration_time,
+                                "changes": child_program.metadata.get("changes", ""),
+                            }
+                            if codex_evaluation:
+                                if codex_evaluation.get("response"):
+                                    trace_metadata["codex_response"] = codex_evaluation["response"]
+                                if codex_evaluation.get("payload_dict"):
+                                    trace_metadata["codex_payload"] = codex_evaluation["payload_dict"]
+
                             self.evolution_tracer.log_trace(
                                 iteration=completed_iteration,
                                 parent_program=parent_program,
@@ -497,10 +618,7 @@ class ProcessParallelController:
                                 llm_response=result.llm_response,
                                 artifacts=result.artifacts,
                                 island_id=island_id,
-                                metadata={
-                                    "iteration_time": result.iteration_time,
-                                    "changes": child_program.metadata.get("changes", ""),
-                                }
+                                metadata=trace_metadata,
                             )
 
                     # Log prompts

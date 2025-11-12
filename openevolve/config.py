@@ -195,6 +195,7 @@ class PromptConfig:
     template_dir: Optional[str] = None
     system_message: str = "system_message"
     evaluator_system_message: str = "evaluator_system_message"
+    eval_agent_prompt: Optional[str] = None
 
     # Number of examples to include in the prompt
     num_top_programs: int = 3
@@ -343,6 +344,7 @@ class Config:
     log_level: str = "INFO"
     log_dir: Optional[str] = None
     random_seed: Optional[int] = 42
+    code_summary: Optional[str] = None
     language: str = None
     file_suffix: str = ".py"
 
@@ -398,6 +400,11 @@ class Config:
         # Ensure database inherits the random seed if not explicitly set
         if config.database.random_seed is None and config.random_seed is not None:
             config.database.random_seed = config.random_seed
+
+        # Backward compatibility: allow legacy code_summary inside database config
+        if config.code_summary is None and config_dict.get("code_summary") is not None:
+            config.code_summary = config_dict["code_summary"]
+
         if "evaluator" in config_dict:
             config.evaluator = EvaluatorConfig(**config_dict["evaluator"])
         if "evolution_trace" in config_dict:
@@ -414,6 +421,7 @@ class Config:
             "log_level": self.log_level,
             "log_dir": self.log_dir,
             "random_seed": self.random_seed,
+            "code_summary": self.code_summary,
             # Component configurations
             "llm": {
                 "models": self.llm.models,
@@ -429,6 +437,7 @@ class Config:
             "prompt": {
                 "template_dir": self.prompt.template_dir,
                 "system_message": self.prompt.system_message,
+                "eval_agent_prompt": self.prompt.eval_agent_prompt,
                 "evaluator_system_message": self.prompt.evaluator_system_message,
                 "num_top_programs": self.prompt.num_top_programs,
                 "num_diverse_programs": self.prompt.num_diverse_programs,
