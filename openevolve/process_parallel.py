@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, Future, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from openevolve.config import Config
 from openevolve.database import Program, ProgramDatabase
@@ -32,6 +32,8 @@ class SerializableResult:
     prompt: Optional[Dict[str, str]] = None
     llm_response: Optional[str] = None
     artifacts: Optional[Dict[str, Any]] = None
+    codex_payload: Optional[Dict[str, Any]] = None
+    codex_response: Optional[str] = None
     iteration: int = 0
     error: Optional[str] = None
 
@@ -168,6 +170,8 @@ def _run_iteration_worker(
         # Best programs only (for previous attempts section, focused on top performers)
         best_programs_only = island_programs[: _worker_config.prompt.num_top_programs]
 
+        code_summary = getattr(_worker_config, "code_summary", None)
+
         # Build prompt
         prompt = _worker_prompt_sampler.build_prompt(
             current_program=parent.code,
@@ -181,6 +185,7 @@ def _run_iteration_worker(
             diff_based_evolution=_worker_config.diff_based_evolution,
             program_artifacts=parent_artifacts,
             feature_dimensions=db_snapshot.get("feature_dimensions", []),
+            code_summary=code_summary,
         )
 
         iteration_start = time.time()
@@ -207,6 +212,7 @@ def _run_iteration_worker(
 
             diff_blocks = extract_diffs(llm_response)
             if not diff_blocks:
+                logger.warning("Raw LLM response with no diffs:\n%s", llm_response)
                 return SerializableResult(
                     error=f"No valid diffs found in response", iteration=iteration
                 )
@@ -241,6 +247,173 @@ def _run_iteration_worker(
         # Get artifacts
         artifacts = _worker_evaluator.get_pending_artifacts(child_id)
 
+        codex_payload = None
+        codex_response = None
+        if isinstance(child_metrics, dict) and child_metrics.get("run_success") == 1:
+            summary = None
+            runs = None
+            debug_path = None
+            debug_dir: Optional[Path] = None
+            if isinstance(artifacts, dict):
+                summary = artifacts.pop("summary", None)
+                runs = artifacts.pop("runs", None)
+                debug_path = artifacts.pop("debug_path", None)
+
+                if isinstance(debug_path, str) and debug_path.strip():
+                    try:
+                        base_debug_dir = Path(debug_path).expanduser().resolve()
+                        debug_dir = base_debug_dir / "evolve_debug"
+                        debug_dir.mkdir(parents=True, exist_ok=True)
+                        debug_path = str(debug_dir)
+                    except Exception as exc:
+                        logger.error("Unable to prepare debug_path %s: %s", debug_path, exc)
+                        debug_dir = None
+                elif debug_path:
+                    logger.error(
+                        "debug_path artifact must be a non-empty string, got %s",
+                        type(debug_path).__name__,
+                    )
+                    debug_path = None
+
+            if summary is None or runs is None or debug_path is None:
+                print(
+                    "Codex payload missing summary/runs/debug_path: "
+                    f"summary={summary is not None}, runs={runs is not None}, debug_path={debug_path is not None}"
+                )
+
+            eval_agent_prompt = getattr(_worker_config, "eval_agent_prompt", None)
+            if eval_agent_prompt is None and hasattr(_worker_config, "prompt"):
+                eval_agent_prompt = getattr(_worker_config.prompt, "eval_agent_prompt", None)
+
+            parent_perf_expl = None
+            if isinstance(parent_artifacts, dict):
+                parent_perf_expl = parent_artifacts.get("perf_expl")
+
+            codex_payload = {
+                "eval_agent_prompt": eval_agent_prompt,
+                "code": child_code,
+                "metrics": child_metrics,
+                "summary": summary,
+                "runs": runs,
+                "debug_path": debug_path,
+                "parent_program": parent.to_dict() if parent else None,
+                "parent_metrics": parent.metrics if parent else None,
+                "parent_perf_expl": parent_perf_expl,
+                "code_summary": code_summary,
+            }
+
+            codex_payload_str = json.dumps(codex_payload, ensure_ascii=False)
+
+            if debug_dir:
+                payload_file = debug_dir / f"codex_payload_{child_id}.json"
+                try:
+                    payload_file.write_text(codex_payload_str, encoding="utf-8")
+                except Exception as exc:
+                    logger.error("Failed to write Codex payload to %s: %s", payload_file, exc)
+
+                prompt_file = debug_dir / f"llm_prompt_{child_id}.json"
+                try:
+                    prompt_file.write_text(
+                        json.dumps(prompt, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                except Exception as exc:
+                    logger.error("Failed to write LLM prompt to %s: %s", prompt_file, exc)
+
+                llm_response_file = debug_dir / f"llm_response_{child_id}.txt"
+                try:
+                    llm_response_file.write_text(llm_response or "", encoding="utf-8")
+                except Exception as exc:
+                    logger.error("Failed to write LLM response to %s: %s", llm_response_file, exc)
+
+                # Link this run back to the parent's experiment directory (exp-*)
+                parent_debug_path = None
+                if parent and isinstance(parent.metadata, dict):
+                    parent_debug_path = parent.metadata.get("debug_path")
+
+                exp_marker_name = None
+                if parent_debug_path:
+                    try:
+                        parent_path = Path(parent_debug_path)
+                        for part in reversed(parent_path.parts):
+                            if "exp" in part.lower():
+                                exp_marker_name = part
+                                break
+                    except Exception as exc:
+                        logger.error(
+                            "Failed to parse parent debug_path %s: %s", parent_debug_path, exc
+                        )
+
+                if exp_marker_name:
+                    marker_path = debug_dir / exp_marker_name
+                    try:
+                        marker_path.touch(exist_ok=True)
+                    except Exception as exc:
+                        logger.error(
+                            "Failed to create parent experiment marker %s: %s", marker_path, exc
+                        )
+
+            print("Starting Codex evaluation...")
+
+            try:
+                start_time = time.time()
+                codex_proc = subprocess.run(
+                    [
+                        "codex",
+                        "exec",
+                        "--full-auto",
+                        "--model",
+                        "gpt-5-codex",
+                        "--config",
+                        "model_reasoning_effort=high",
+                        "--",
+                        codex_payload_str,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                elapsed = time.time() - start_time
+                print(f"Codex evaluation took {elapsed:.3f} seconds")
+
+                if codex_proc.stderr:
+                    if debug_dir:
+                        stderr_file = debug_dir / "codex_proc_stderr"
+                        try:
+                            with stderr_file.open("a", encoding="utf-8") as f:
+                                f.write(codex_proc.stderr)
+                                if not codex_proc.stderr.endswith("\n"):
+                                    f.write("\n")
+                        except Exception as file_exc:
+                            logger.error(
+                                "Could not write Codex stderr to %s: %s", stderr_file, file_exc
+                            )
+                    else:
+                        logger.error("codex_proc.stderr captured but debug_path not available")
+
+                
+                codex_response = codex_proc.stdout.strip()
+                if codex_proc.returncode != 0:
+                    logger.warning(
+                        "Codex evaluation command failed (exit %s): %s",
+                        codex_proc.returncode,
+                        codex_proc.stderr.strip(),
+                    )
+            except Exception as exc:
+                logger.error("Codex evaluation command raised an exception: %s", exc)
+                codex_response = None
+
+            if debug_dir:
+                response_file = debug_dir / f"codex_response_{child_id}.txt"
+                try:
+                    response_file.write_text(codex_response or "", encoding="utf-8")
+                except Exception as exc:
+                    logger.error("Failed to write Codex response to %s: %s", response_file, exc)
+
+            if codex_response:
+                if artifacts is None:
+                    artifacts = {}
+                artifacts["perf_expl"] = codex_response
+
         # Create child program
         child_program = Program(
             id=child_id,
@@ -254,6 +427,7 @@ def _run_iteration_worker(
                 "changes": changes_summary,
                 "parent_metrics": parent.metrics,
                 "island": parent_island,
+                **({"debug_path": debug_path} if debug_path else {}),
             },
         )
 
@@ -325,6 +499,7 @@ class ProcessParallelController:
             "diff_based_evolution": config.diff_based_evolution,
             "max_code_length": config.max_code_length,
             "language": config.language,
+            "code_summary": config.code_summary,
             "file_suffix": self.file_suffix,
         }
 
@@ -387,106 +562,6 @@ class ProcessParallelController:
 
         return snapshot
 
-
-    def _call_codex_evaluation(self, program: Program, artifacts: Dict[str, Any]) -> Dict[str, Any]:
-        """Call the codex evaluation context/explanation API"""
-        metrics = getattr(program, "metrics", None)
-        if not isinstance(metrics, dict):
-            return None
-
-        run_success = metrics.get("run_success")
-        if run_success != 1:
-            return None
-
-        code = program.code
-        log_metric: List[Tuple[str, str]] = []
-        if isinstance(artifacts, dict):
-            logs_payload = artifacts.get("logs") or artifacts.get("log_files")
-            if isinstance(logs_payload, dict):
-                log_metric = [
-                    (name, path)
-                    for name, path in logs_payload.items()
-                    if isinstance(name, str) and isinstance(path, str)
-                ]
-            elif isinstance(logs_payload, list):
-                for entry in logs_payload:
-                    if (
-                        isinstance(entry, dict)
-                        and isinstance(entry.get("name"), str)
-                        and isinstance(entry.get("path"), str)
-                    ):
-                        log_metric.append((entry["name"], entry["path"]))
-
-        code_summary = getattr(self, "code_summary", None)
-        if code_summary is None:
-            code_summary = getattr(self.config, "code_summary", None)
-
-        eval_agent_prompt = getattr(self.config, "eval_agent_prompt", None)
-        if eval_agent_prompt is None and hasattr(self.config, "prompt"):
-            eval_agent_prompt = getattr(self.config.prompt, "eval_agent_prompt", None)
-
-        parent_program = self.database.get(program.parent_id) if program.parent_id else None
-        parent_metrics = parent_program.metrics if parent_program else None
-        parent_perf_expl = None
-        if parent_program:
-            parent_artifacts = self.database.get_artifacts(parent_program.id)
-            if isinstance(parent_artifacts, dict):
-                parent_perf_expl = parent_artifacts.get("perf_expl")
-
-        codex_payload = {
-            "eval_agent_prompt": eval_agent_prompt,
-            "code": code,
-            "metrics": metrics,
-            "log_metric": log_metric,
-            "parent_program": parent_program.to_dict() if parent_program else None,
-            "parent_metrics": parent_metrics,
-            "parent_perf_expl": parent_perf_expl,
-            "code_summary": code_summary,
-            #"artifacts": artifacts,
-        }
-
-        codex_payload_str = json.dumps(codex_payload, ensure_ascii=False)
-
-        print("Starting Codex evaluation...")
-
-        try:
-            import time
-            start_time = time.time()
-            result = subprocess.run(
-                [
-                    "codex",
-                    "exec",
-                    "--full-auto",
-                    "--model",
-                    "gpt-5-codex",
-                    "--config",
-                    "model_reasoning_effort=medium",
-                    "--",
-                    codex_payload_str,
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            elapsed = time.time() - start_time
-            print(f"Codex evaluation took {elapsed:.3f} seconds")
-            codex_response = result.stdout.strip()
-            if result.returncode != 0:
-                logger.warning(
-                    "Codex evaluation command failed (exit %s): %s",
-                    result.returncode,
-                    result.stderr.strip(),
-                )
-        except Exception as exc:
-            logger.error("Codex evaluation command raised an exception: %s", exc)
-            codex_response = None
-
-        return {
-            #"payload": codex_payload_str,
-            "payload_dict": codex_payload,
-            "response": codex_response,
-        }
-
     async def run_evolution(
         self,
         start_iteration: int,
@@ -509,6 +584,7 @@ class ProcessParallelController:
         pending_futures: Dict[int, Future] = {}
         island_pending: Dict[int, List[int]] = {i: [] for i in range(self.num_islands)}
         batch_size = min(self.num_workers * 2, max_iterations)
+        batch_size = min(self.num_workers, max_iterations)
 
         # Submit initial batch - distribute across islands
         batch_per_island = max(1, batch_size // self.num_islands) if batch_size > 0 else 0
@@ -579,15 +655,6 @@ class ProcessParallelController:
                     # No need to specify target_island - database will handle parent island inheritance
                     self.database.add(child_program, iteration=completed_iteration)
 
-                    # TODO: Add in the codex evaluation context/explanation call here. 
-                    codex_evaluation = self._call_codex_evaluation(child_program, result.artifacts)
-
-                    # Persist performance explanation returned by Codex in artifacts
-                    if codex_evaluation and codex_evaluation.get("response"):
-                        if not result.artifacts:
-                            result.artifacts = {}
-                        result.artifacts["perf_expl"] = codex_evaluation["response"]
-
                     # Store artifacts
                     if result.artifacts:
                         self.database.store_artifacts(child_program.id, result.artifacts)
@@ -604,11 +671,8 @@ class ProcessParallelController:
                                 "iteration_time": result.iteration_time,
                                 "changes": child_program.metadata.get("changes", ""),
                             }
-                            if codex_evaluation:
-                                if codex_evaluation.get("response"):
-                                    trace_metadata["codex_response"] = codex_evaluation["response"]
-                                if codex_evaluation.get("payload_dict"):
-                                    trace_metadata["codex_payload"] = codex_evaluation["payload_dict"]
+                            # if result.codex_payload:
+                            #     trace_metadata["codex_payload"] = result.codex_payload
 
                             self.evolution_tracer.log_trace(
                                 iteration=completed_iteration,
@@ -820,7 +884,8 @@ class ProcessParallelController:
             # This fixes the race condition from GitHub issue #246
             parent, inspirations = self.database.sample_from_island(
                 island_id=target_island,
-                num_inspirations=self.config.prompt.num_top_programs
+                num_inspirations=self.config.prompt.num_top_programs,
+                require_artifact="has_perf_expl",
             )
 
             # Create database snapshot

@@ -1,0 +1,7 @@
+llama-index>=0.14.0
+tree_sitter>=0.21.3
+tree_sitter_language_pack>=0.0.15
+langchain>=1.0.0
+langchain-classic>=1.0.0
+langchain-openai>=0.2.0
+langchain-community>=0.2.0

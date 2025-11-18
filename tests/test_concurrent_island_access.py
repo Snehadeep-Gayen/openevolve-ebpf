@@ -156,7 +156,7 @@ class TestConcurrentIslandAccess(unittest.TestCase):
         This simulates what the fix would look like
         """
         # Mock the proposed sample_from_island method
-        def sample_from_island_safe(island_id, num_inspirations=2):
+        def sample_from_island_safe(island_id, num_inspirations=2, require_artifact=None):
             """
             Safe sampling that doesn't modify current_island
             This is what we'll implement in the database

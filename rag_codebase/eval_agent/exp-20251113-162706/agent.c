@@ -1,0 +1,87 @@
+/*
+ Pebble agent UDP reuseport selector (optimized, verifier-friendly)
+
+ Approach:
+ - Compute a single target slot from the 5-tuple hash provided in sk_reuseport_md.
+ - Call bpf_sk_select_reuseport exactly once. The kernel will honor only the
+   first call per packet in this hook, so any extra attempts are wasted work.
+ - Fast path for power-of-two active sockets: use bitmask instead of modulo.
+ - Clamp active to [1, 128] to stay within the sockarray bounds.
+ - Fall back to SK_PASS when state is missing or inactive; kernel’s default
+   hash-based selection remains in effect.
+
+ Why this should improve performance:
+ - Eliminates a fully unrolled 128-iteration loop and multiple conditional
+   branches in the hot path, cutting instruction count and cycles per packet.
+ - Reduces I-cache pressure and verifier/JIT complexity, which helps tail
+   latency at high packet rates.
+ - Keeps distribution stable by using the kernel-provided flow hash and
+   selecting directly without retries.
+
+ The program adheres to eBPF verifier constraints:
+ - No unbounded loops; no stack-heavy constructs.
+ - Single call to bpf_sk_select_reuseport.
+ - Only uses data available in sk_reuseport_md and pinned maps.
+*/
+
+ //go:build ignore
+
+#include <linux/bpf.h>
+#include <bpf/bpf_helpers.h>
+
+struct {
+    __uint(type, BPF_MAP_TYPE_REUSEPORT_SOCKARRAY);
+    __uint(max_entries, 128);
+    __type(key, __u32);
+    __type(value, __u32);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} pebble_udp_targets SEC(".maps");
+
+struct agent_state {
+    __u32 active;
+    __u32 pad;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct agent_state);
+    __uint(pinning, LIBBPF_PIN_BY_NAME);
+} pebble_agent_state SEC(".maps");
+
+/* EVOLVE-BLOCK-START
+   Simplified, single-shot selection:
+   - Use hash to compute slot directly.
+   - Single helper call; no retry loop (kernel ignores subsequent calls anyway).
+*/
+SEC("sk_reuseport/selector")
+enum sk_action agent_udp_selector(struct sk_reuseport_md *reuse)
+{
+    __u32 key = 0;
+    struct agent_state *st = bpf_map_lookup_elem(&pebble_agent_state, &key);
+    if (!st)
+        return SK_PASS;
+
+    __u32 active = st->active;
+    if (active == 0)
+        return SK_PASS;
+    if (active > 128)
+        active = 128;
+
+    __u32 slot;
+    if ((active & (active - 1)) == 0) {
+        // Power-of-two fast path
+        slot = reuse->hash & (active - 1);
+    } else {
+        // General case
+        slot = reuse->hash % active;
+    }
+
+    // Single selection attempt; if it fails, SK_PASS falls back to kernel default.
+    bpf_sk_select_reuseport(reuse, &pebble_udp_targets, &slot, 0);
+    return SK_PASS;
+}
+// EVOLVE-BLOCK-END
+
+char _license[] SEC("license") = "GPL";

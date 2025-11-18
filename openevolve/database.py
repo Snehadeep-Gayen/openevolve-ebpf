@@ -361,6 +361,13 @@ class ProgramDatabase:
         """
         return self.programs.get(program_id)
 
+    def _program_has_metadata_flag(self, program_id: str, metadata_key: str) -> bool:
+        """Check if a program's metadata contains a truthy flag"""
+        program = self.programs.get(program_id)
+        if not program or not program.metadata:
+            return False
+        return bool(program.metadata.get(metadata_key))
+
     def sample(self, num_inspirations: Optional[int] = None) -> Tuple[Program, List[Program]]:
         """
         Sample a program and inspirations for the next evolution step
@@ -383,7 +390,10 @@ class ProgramDatabase:
         return parent, inspirations
 
     def sample_from_island(
-        self, island_id: int, num_inspirations: Optional[int] = None
+        self,
+        island_id: int,
+        num_inspirations: Optional[int] = None,
+        require_artifact: Optional[str] = None,
     ) -> Tuple[Program, List[Program]]:
         """
         Sample a program and inspirations from a specific island without modifying current_island
@@ -397,6 +407,7 @@ class ProgramDatabase:
         Args:
             island_id: The island to sample from
             num_inspirations: Number of inspiration programs to sample (defaults to 5)
+            require_artifact: Metadata flag (e.g. "has_perf_expl") required on parent programs
 
         Returns:
             Tuple of (parent_program, inspiration_programs)
@@ -406,6 +417,24 @@ class ProgramDatabase:
 
         # Get programs from the specific island
         island_programs = list(self.islands[island_id])
+        artifact_filtered_programs: Optional[List[str]] = None
+
+        if require_artifact:
+            filtered = [
+                pid
+                for pid in island_programs
+                if self._program_has_metadata_flag(pid, require_artifact)
+            ]
+            if filtered:
+                artifact_filtered_programs = filtered
+            else:
+                logger.debug(
+                    "No programs with metadata flag '%s' found on island %s, "
+                    "falling back to default sampling",
+                    require_artifact,
+                    island_id,
+                )
+                require_artifact = None
 
         if not island_programs:
             # Island is empty, fall back to sampling from all programs
@@ -416,17 +445,22 @@ class ProgramDatabase:
         # This matches the logic in _sample_parent() for consistent behavior
         rand_val = random.random()
 
+        candidate_ids = artifact_filtered_programs if require_artifact else None
         if rand_val < self.config.exploration_ratio:
             # EXPLORATION: Sample randomly from island (diverse sampling)
-            parent = self._sample_from_island_random(island_id)
+            parent = self._sample_from_island_random(island_id, candidate_ids=candidate_ids)
             sampling_mode = "exploration"
         elif rand_val < self.config.exploration_ratio + self.config.exploitation_ratio:
             # EXPLOITATION: Sample from archive (elite programs)
-            parent = self._sample_from_archive_for_island(island_id)
+            parent = self._sample_from_archive_for_island(
+                island_id,
+                required_metadata=require_artifact,
+                fallback_candidate_ids=candidate_ids,
+            )
             sampling_mode = "exploitation"
         else:
             # WEIGHTED: Use fitness-weighted sampling (remaining probability)
-            parent = self._sample_from_island_weighted(island_id)
+            parent = self._sample_from_island_weighted(island_id, candidate_ids=candidate_ids)
             sampling_mode = "weighted"
 
         # Select inspirations from the same island
@@ -1384,7 +1418,9 @@ class ProgramDatabase:
         program_id = random.choice(list(self.programs.keys()))
         return self.programs[program_id]
 
-    def _sample_from_island_weighted(self, island_id: int) -> Program:
+    def _sample_from_island_weighted(
+        self, island_id: int, candidate_ids: Optional[List[str]] = None
+    ) -> Program:
         """
         Sample a parent from a specific island using fitness-weighted selection
 
@@ -1395,7 +1431,11 @@ class ProgramDatabase:
             Parent program selected using fitness-weighted sampling
         """
         island_id = island_id % len(self.islands)
-        island_programs = list(self.islands[island_id])
+
+        if candidate_ids is not None:
+            island_programs = candidate_ids
+        else:
+            island_programs = list(self.islands[island_id])
 
         if not island_programs:
             # Island is empty, fall back to any available program
@@ -1442,7 +1482,9 @@ class ProgramDatabase:
 
         return parent
 
-    def _sample_from_island_random(self, island_id: int) -> Program:
+    def _sample_from_island_random(
+        self, island_id: int, candidate_ids: Optional[List[str]] = None
+    ) -> Program:
         """
         Sample a completely random parent from a specific island (uniform distribution)
 
@@ -1452,6 +1494,18 @@ class ProgramDatabase:
         Returns:
             Parent program selected uniformly at random
         """
+        if candidate_ids is not None:
+            valid_programs = [pid for pid in candidate_ids if pid in self.programs]
+            if not valid_programs:
+                logger.warning(
+                    "Candidate list for island %s is empty during filtered random sampling, "
+                    "falling back to default island sampling",
+                    island_id,
+                )
+            else:
+                parent_id = random.choice(valid_programs)
+                return self.programs[parent_id]
+
         island_id = island_id % len(self.islands)
         island_programs = list(self.islands[island_id])
 
@@ -1471,12 +1525,19 @@ class ProgramDatabase:
         parent_id = random.choice(valid_programs)
         return self.programs[parent_id]
 
-    def _sample_from_archive_for_island(self, island_id: int) -> Program:
+    def _sample_from_archive_for_island(
+        self,
+        island_id: int,
+        required_metadata: Optional[str] = None,
+        fallback_candidate_ids: Optional[List[str]] = None,
+    ) -> Program:
         """
         Sample a parent from the archive, preferring programs from the specified island
 
         Args:
             island_id: The island to prefer programs from
+            required_metadata: Metadata flag required on archive programs
+            fallback_candidate_ids: Candidate IDs to use when falling back to island sampling
 
         Returns:
             Parent program from archive (preferably from the specified island)
@@ -1484,16 +1545,39 @@ class ProgramDatabase:
         if not self.archive:
             # Fallback to weighted sampling from island
             logger.debug(f"Archive is empty, falling back to weighted island sampling")
-            return self._sample_from_island_weighted(island_id)
+            return self._sample_from_island_weighted(
+                island_id, candidate_ids=fallback_candidate_ids
+            )
 
         # Clean up stale references in archive
         valid_archive = [pid for pid in self.archive if pid in self.programs]
 
         if not valid_archive:
             logger.warning("Archive has no valid programs, falling back to weighted island sampling")
-            return self._sample_from_island_weighted(island_id)
+            return self._sample_from_island_weighted(
+                island_id, candidate_ids=fallback_candidate_ids
+            )
 
         island_id = island_id % len(self.islands)
+
+        if required_metadata:
+            flagged_archive = [
+                pid
+                for pid in valid_archive
+                if self._program_has_metadata_flag(pid, required_metadata)
+            ]
+            if flagged_archive:
+                valid_archive = flagged_archive
+            else:
+                logger.debug(
+                    "Archive does not contain programs with metadata flag '%s' for island %s, "
+                    "falling back to filtered island sampling",
+                    required_metadata,
+                    island_id,
+                )
+                return self._sample_from_island_weighted(
+                    island_id, candidate_ids=fallback_candidate_ids
+                )
 
         # Prefer programs from the specified island in archive
         archive_programs_in_island = [
@@ -2312,7 +2396,10 @@ class ProgramDatabase:
         large_artifacts = {}
         size_threshold = getattr(self.config, "artifact_size_threshold", 32 * 1024)  # 32KB default
 
+        has_perf_expl = False
         for key, value in artifacts.items():
+            if key == "perf_expl":
+                has_perf_expl = True
             size = self._get_artifact_size(value)
             if size <= size_threshold:
                 small_artifacts[key] = value
@@ -2331,6 +2418,11 @@ class ProgramDatabase:
             for key, value in large_artifacts.items():
                 self._write_artifact_file(artifact_dir, key, value)
             logger.debug(f"Stored {len(large_artifacts)} large artifacts for program {program_id}")
+
+        if has_perf_expl:
+            if program.metadata is None:
+                program.metadata = {}
+            program.metadata["has_perf_expl"] = True
 
     def get_artifacts(self, program_id: str) -> Dict[str, Union[str, bytes]]:
         """

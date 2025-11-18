@@ -5,6 +5,8 @@
 
 {artifacts}
 
+{code_summary_section}
+
 # Program Evolution History
 {evolution_history}
 

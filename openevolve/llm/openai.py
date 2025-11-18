@@ -182,4 +182,5 @@ class OpenAILLM(LLMInterface):
         logger = logging.getLogger(__name__)
         logger.debug(f"API parameters: {params}")
         logger.debug(f"API response: {response.choices[0].message.content}")
+
         return response.choices[0].message.content

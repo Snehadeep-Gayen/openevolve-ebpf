@@ -68,7 +68,7 @@ class TestIslandIsolation(unittest.TestCase):
         # Track which islands were sampled
         sampled_islands = []
 
-        def mock_sample_from_island(island_id, num_inspirations=None):
+        def mock_sample_from_island(island_id, num_inspirations=None, require_artifact=None):
             # Record which island was sampled (using the island_id parameter)
             sampled_islands.append(island_id)
             # Return mock parent and inspirations

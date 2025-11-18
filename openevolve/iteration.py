@@ -59,6 +59,7 @@ async def run_iteration_with_shared_db(
         island_previous_programs = database.get_top_programs(3, island_idx=parent_island)
 
         # Build prompt
+        code_summary = getattr(config, "code_summary", None)
         prompt = prompt_sampler.build_prompt(
             current_program=parent.code,
             parent_program=parent.code,
@@ -71,6 +72,7 @@ async def run_iteration_with_shared_db(
             diff_based_evolution=config.diff_based_evolution,
             program_artifacts=parent_artifacts if parent_artifacts else None,
             feature_dimensions=database.config.feature_dimensions,
+            code_summary=code_summary,
         )
 
         result = Result(parent=parent)

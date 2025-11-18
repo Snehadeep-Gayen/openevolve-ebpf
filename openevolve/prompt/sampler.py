@@ -62,6 +62,7 @@ class PromptSampler:
         template_key: Optional[str] = None,
         program_artifacts: Optional[Dict[str, Union[str, bytes]]] = None,
         feature_dimensions: Optional[List[str]] = None,
+        code_summary: Optional[str] = None,
         **kwargs: Any,
     ) -> Dict[str, str]:
         """
@@ -79,6 +80,7 @@ class PromptSampler:
             diff_based_evolution: Whether to use diff-based evolution (True) or full rewrites (False)
             template_key: Optional override for template key
             program_artifacts: Optional artifacts from program evaluation
+            code_summary: Optional high-level summary of the codebase
             **kwargs: Additional keys to replace in the user prompt
 
         Returns:
@@ -125,6 +127,11 @@ class PromptSampler:
         if self.config.include_artifacts and program_artifacts:
             artifacts_section = self._render_artifacts(program_artifacts)
 
+        # Optional code summary section
+        code_summary_section = ""
+        if code_summary:
+            code_summary_section = f"# Codebase Summary\n{code_summary}\n"
+
         # Apply stochastic template variations if enabled
         if self.config.use_template_stochasticity:
             user_template = self._apply_template_variations(user_template)
@@ -135,18 +142,21 @@ class PromptSampler:
         feature_coords = format_feature_coordinates(program_metrics, feature_dimensions)
 
         # Format the final user message
-        user_message = user_template.format(
-            metrics=metrics_str,
-            fitness_score=f"{fitness_score:.4f}",
-            feature_coords=feature_coords,
-            feature_dimensions=", ".join(feature_dimensions) if feature_dimensions else "None",
-            improvement_areas=improvement_areas,
-            evolution_history=evolution_history,
-            current_program=current_program,
-            language=language,
-            artifacts=artifacts_section,
-            **kwargs,
-        )
+        format_kwargs = {
+            "metrics": metrics_str,
+            "fitness_score": f"{fitness_score:.4f}",
+            "feature_coords": feature_coords,
+            "feature_dimensions": ", ".join(feature_dimensions) if feature_dimensions else "None",
+            "improvement_areas": improvement_areas,
+            "evolution_history": evolution_history,
+            "current_program": current_program,
+            "language": language,
+            "artifacts": artifacts_section,
+            "code_summary_section": code_summary_section,
+        }
+        format_kwargs.update(kwargs)
+
+        user_message = user_template.format(**format_kwargs)
 
         return {
             "system": system_message,
