@@ -1,0 +1,230 @@
+[
+  {
+    "iterations": [
+      {
+        "iteration": 0,
+        "assistant_role": "assistant",
+        "assistant_content_format": "json",
+        "assistant_content_raw": "{\n  \"status\": \"continue\",\n  \"Summary\": \"Across five runs of the agent policy, the server behaves normally at 50\u201360k req/s but becomes throughput-limited above ~60\u2013100k req/s, causing rapidly growing client backlogs, dropped responses, and multi\u2011second p99 latencies. Per-worker server stats show that in each run only about four of the six configured workers actually handle traffic, with stable relative shares per worker, consistent with hash-based steering over a small number of client UDP flows.\",\n  \"log_summaries\": {\n    \"agent-50000\": {\n      \"server_log\": \"Server starts twice with workers=6, policy=agent, GET delay 10\u00b5s and SCAN delay 2ms. Perf logger shows only workers 1\u20134 handling traffic, with roughly 48\u201350k GETs/sec total and ~200 scans/sec. Per-worker GET and SCAN averages match the configured delays and remain stable; no errors logged. Server stops cleanly.\",\n      \"client_log\": \"Client runs for 10s at 50k req/s with 99% GETs. Outstanding requests stay low (mostly under 200). By the end, sent and received counts match (\u2248494k), and no warnings about missing responses appear, indicating the server keeps up with the offered load.\"\n    },\n    \"agent-60000\": {\n      \"server_log\": \"Server again starts with workers=6, policy=agent. Perf logs show workers 1,2,3,5 receiving traffic; workers 0 and 4 never appear. Aggregate throughput per 1s interval is around 59\u201360k GETs/sec with ~300 scans/sec, and per-request busy-wait times remain ~10\u00b5s for GET and ~2ms for SCAN. No errors reported; server shuts down normally.\",\n      \"client_log\": \"Client runs 10s at 60k req/s. Outstanding counts fluctuate modestly (tens to low hundreds), and final sent and received totals match (~596k). No missing-response warnings, implying stable operation at this rate.\"\n    },\n    \"agent-80000\": {\n      \"server_log\": \"Server runs with workers=6, but only workers 0,1,3,5 appear in perf logs. Their combined throughput per second is ~60k GETs (plus scans), significantly below the 80k/s target. Per-request synthetic delays (GET ~10\u00b5s, SCAN ~2ms) stay nominal, and no server-side errors are logged. The server eventually stops cleanly.\",\n      \"client_log\": \"Client targets 80k req/s. After the first second, outstanding requests explode from ~18k to ~188k over the run, while cumulative receives lag far behind sends. At the end, about 135k responses are missing (\u2248661k recv vs 797k sent), with a warning emitted. This shows the server cannot keep up: responses plateau around ~60\u201370k/s, leading to a large backlog and drops, and is consistent with the very high reported p99 latencies (~4.9s).\"\n    },\n    \"agent-100000\": {\n      \"server_log\": \"Server starts with workers=6; perf logs show only workers 1\u20134 handling traffic. Aggregate throughput stabilizes around 80\u201382k GETs/sec plus ~400 scans/sec. Per-request busy-wait times remain near their configured values. There are no reported errors; the server shuts down normally.\",\n      \"client_log\": \"Client runs at 100k req/s. Outstanding requests grow steadily from ~17k to over 180k, with receives per second leveling off near ~80\u201390k. By the end, \u2248111k responses are missing (\u2248885k recv vs 996k sent), and a warning about missing responses is logged, explaining the multi-second client-observed p99 latencies (~4.5s).\"\n    },\n    \"agent-140000\": {\n      \"server_log\": \"Server again uses workers=6, but only workers 0,3,4,5 show traffic. Their combined throughput per interval is ~90\u201393k GETs/sec plus ~450\u2013480 scans/sec. Per-request synthetic delays remain around 10\u00b5s/2ms. No server-side errors; server stops cleanly.\",\n      \"client_log\": \"Client sends at 140k req/s. Outstanding requests increase monotonically, exceeding 460k by the end, while receive counts plateau around 100\u2013105k/s. Final counts show \u2248361k missing responses (\u22481.02M recv vs 1.38M sent), with a warning. This sustained overload matches the extreme p99 latency (~6.5s) seen in the metrics.\"\n    }\n  },\n  \"hypothesis\": {\n    \"text\": \"The agent selector\u2019s pure hash-based steering (slot = hash % active) combined with the client\u2019s small, fixed set of UDP flows pins most traffic onto only about four of the six worker sockets, limiting effective parallelism. At offered rates \u226580k req/s, these few hot workers become saturated, their socket receive queues back up, and excess packets are dropped, so requests wait seconds in queues (or never get a reply), producing the very large client p99 latencies and missing-response warnings.\",\n    \"score\": 7\n  },\n  \"questions\": [\n    \"In cmd/workload_client/main.go, does each send worker goroutine create its own UDP connection (e.g., via net.DialUDP) with a distinct local port, or do all send workers share a single UDPConn?\",\n    \"In internal/server/ebpf.go, for the 'agent' policy, how is the pebble_agent_state.active field initialized relative to cfg.Workers?\",\n    \"In internal/server/ebpf.go\u2019s updateTargetsMap (or equivalent), are entries written into pebble_udp_targets for every worker index from 0 up to cfg.Workers-1, or only for a subset of workers?\",\n    \"In internal/server/server.go\u2019s startStatsLogger, does the logger skip printing a 'worker=N' line for workers that had zero requests in the last interval (or since server start), or does it always print all workers regardless of activity?\"\n  ]\n}",
+        "full_response": {
+          "id": "chatcmpl-CdjA6uxJW8qAOORKEg50QM0IXp89k",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "logprobs": null,
+              "message": {
+                "content": "{\n  \"status\": \"continue\",\n  \"Summary\": \"Across five runs of the agent policy, the server behaves normally at 50\u201360k req/s but becomes throughput-limited above ~60\u2013100k req/s, causing rapidly growing client backlogs, dropped responses, and multi\u2011second p99 latencies. Per-worker server stats show that in each run only about four of the six configured workers actually handle traffic, with stable relative shares per worker, consistent with hash-based steering over a small number of client UDP flows.\",\n  \"log_summaries\": {\n    \"agent-50000\": {\n      \"server_log\": \"Server starts twice with workers=6, policy=agent, GET delay 10\u00b5s and SCAN delay 2ms. Perf logger shows only workers 1\u20134 handling traffic, with roughly 48\u201350k GETs/sec total and ~200 scans/sec. Per-worker GET and SCAN averages match the configured delays and remain stable; no errors logged. Server stops cleanly.\",\n      \"client_log\": \"Client runs for 10s at 50k req/s with 99% GETs. Outstanding requests stay low (mostly under 200). By the end, sent and received counts match (\u2248494k), and no warnings about missing responses appear, indicating the server keeps up with the offered load.\"\n    },\n    \"agent-60000\": {\n      \"server_log\": \"Server again starts with workers=6, policy=agent. Perf logs show workers 1,2,3,5 receiving traffic; workers 0 and 4 never appear. Aggregate throughput per 1s interval is around 59\u201360k GETs/sec with ~300 scans/sec, and per-request busy-wait times remain ~10\u00b5s for GET and ~2ms for SCAN. No errors reported; server shuts down normally.\",\n      \"client_log\": \"Client runs 10s at 60k req/s. Outstanding counts fluctuate modestly (tens to low hundreds), and final sent and received totals match (~596k). No missing-response warnings, implying stable operation at this rate.\"\n    },\n    \"agent-80000\": {\n      \"server_log\": \"Server runs with workers=6, but only workers 0,1,3,5 appear in perf logs. Their combined throughput per second is ~60k GETs (plus scans), significantly below the 80k/s target. Per-request synthetic delays (GET ~10\u00b5s, SCAN ~2ms) stay nominal, and no server-side errors are logged. The server eventually stops cleanly.\",\n      \"client_log\": \"Client targets 80k req/s. After the first second, outstanding requests explode from ~18k to ~188k over the run, while cumulative receives lag far behind sends. At the end, about 135k responses are missing (\u2248661k recv vs 797k sent), with a warning emitted. This shows the server cannot keep up: responses plateau around ~60\u201370k/s, leading to a large backlog and drops, and is consistent with the very high reported p99 latencies (~4.9s).\"\n    },\n    \"agent-100000\": {\n      \"server_log\": \"Server starts with workers=6; perf logs show only workers 1\u20134 handling traffic. Aggregate throughput stabilizes around 80\u201382k GETs/sec plus ~400 scans/sec. Per-request busy-wait times remain near their configured values. There are no reported errors; the server shuts down normally.\",\n      \"client_log\": \"Client runs at 100k req/s. Outstanding requests grow steadily from ~17k to over 180k, with receives per second leveling off near ~80\u201390k. By the end, \u2248111k responses are missing (\u2248885k recv vs 996k sent), and a warning about missing responses is logged, explaining the multi-second client-observed p99 latencies (~4.5s).\"\n    },\n    \"agent-140000\": {\n      \"server_log\": \"Server again uses workers=6, but only workers 0,3,4,5 show traffic. Their combined throughput per interval is ~90\u201393k GETs/sec plus ~450\u2013480 scans/sec. Per-request synthetic delays remain around 10\u00b5s/2ms. No server-side errors; server stops cleanly.\",\n      \"client_log\": \"Client sends at 140k req/s. Outstanding requests increase monotonically, exceeding 460k by the end, while receive counts plateau around 100\u2013105k/s. Final counts show \u2248361k missing responses (\u22481.02M recv vs 1.38M sent), with a warning. This sustained overload matches the extreme p99 latency (~6.5s) seen in the metrics.\"\n    }\n  },\n  \"hypothesis\": {\n    \"text\": \"The agent selector\u2019s pure hash-based steering (slot = hash % active) combined with the client\u2019s small, fixed set of UDP flows pins most traffic onto only about four of the six worker sockets, limiting effective parallelism. At offered rates \u226580k req/s, these few hot workers become saturated, their socket receive queues back up, and excess packets are dropped, so requests wait seconds in queues (or never get a reply), producing the very large client p99 latencies and missing-response warnings.\",\n    \"score\": 7\n  },\n  \"questions\": [\n    \"In cmd/workload_client/main.go, does each send worker goroutine create its own UDP connection (e.g., via net.DialUDP) with a distinct local port, or do all send workers share a single UDPConn?\",\n    \"In internal/server/ebpf.go, for the 'agent' policy, how is the pebble_agent_state.active field initialized relative to cfg.Workers?\",\n    \"In internal/server/ebpf.go\u2019s updateTargetsMap (or equivalent), are entries written into pebble_udp_targets for every worker index from 0 up to cfg.Workers-1, or only for a subset of workers?\",\n    \"In internal/server/server.go\u2019s startStatsLogger, does the logger skip printing a 'worker=N' line for workers that had zero requests in the last interval (or since server start), or does it always print all workers regardless of activity?\"\n  ]\n}",
+                "refusal": null,
+                "role": "assistant",
+                "annotations": [],
+                "audio": null,
+                "function_call": null,
+                "tool_calls": null
+              }
+            }
+          ],
+          "created": 1763584430,
+          "model": "gpt-5.1-2025-11-13",
+          "object": "chat.completion",
+          "service_tier": "default",
+          "system_fingerprint": null,
+          "usage": {
+            "completion_tokens": 14912,
+            "prompt_tokens": 19131,
+            "total_tokens": 34043,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 13603,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 19072
+            }
+          }
+        },
+        "status": "continue",
+        "Summary": "Across five runs of the agent policy, the server behaves normally at 50\u201360k req/s but becomes throughput-limited above ~60\u2013100k req/s, causing rapidly growing client backlogs, dropped responses, and multi\u2011second p99 latencies. Per-worker server stats show that in each run only about four of the six configured workers actually handle traffic, with stable relative shares per worker, consistent with hash-based steering over a small number of client UDP flows.",
+        "hypothesis": {
+          "text": "The agent selector\u2019s pure hash-based steering (slot = hash % active) combined with the client\u2019s small, fixed set of UDP flows pins most traffic onto only about four of the six worker sockets, limiting effective parallelism. At offered rates \u226580k req/s, these few hot workers become saturated, their socket receive queues back up, and excess packets are dropped, so requests wait seconds in queues (or never get a reply), producing the very large client p99 latencies and missing-response warnings.",
+          "score": 7
+        },
+        "questions": [
+          "In cmd/workload_client/main.go, does each send worker goroutine create its own UDP connection (e.g., via net.DialUDP) with a distinct local port, or do all send workers share a single UDPConn?",
+          "In internal/server/ebpf.go, for the 'agent' policy, how is the pebble_agent_state.active field initialized relative to cfg.Workers?",
+          "In internal/server/ebpf.go\u2019s updateTargetsMap (or equivalent), are entries written into pebble_udp_targets for every worker index from 0 up to cfg.Workers-1, or only for a subset of workers?",
+          "In internal/server/server.go\u2019s startStatsLogger, does the logger skip printing a 'worker=N' line for workers that had zero requests in the last interval (or since server start), or does it always print all workers regardless of activity?"
+        ],
+        "question_answers": [
+          {
+            "question": "In cmd/workload_client/main.go, does each send worker goroutine create its own UDP connection (e.g., via net.DialUDP) with a distinct local port, or do all send workers share a single UDPConn?",
+            "answer": {
+              "answer": "Each send worker goroutine creates its own UDP connection via a separate call to net.DialUDP, so they do not share a single UDPConn. Because net.DialUDP is called inside the loop that starts each worker and is passed the remote address with a nil local address, the OS assigns a distinct local port for each worker\u2019s UDPConn.",
+              "code_snippets": [
+                {
+                  "path": "cmd/workload_client/main.go",
+                  "snippet": "conn, err := net.DialUDP(\"udp\", nil, udpAddr)\n\t\tif err != nil {\n\t\t\tlogger.Fatalf(\"dial udp worker=%d: %v\", i, err)\n\t\t}\n\t\tdefer conn.Close()\n\n\t\tseed := time.Now().UnixNano() + int64(i)\n\t\trng := rand.New(rand.NewSource(seed))\n\n\t\tworkerID := i\n\n\t\tsendWG.Add(1)\n\t\tgo func(workerID int, conn *net.UDPConn, rng *rand.Rand) {"
+                },
+                {
+                  "path": "cmd/workload_client/main.go",
+                  "snippet": "go func(workerID int, conn *net.UDPConn) {\n\t\t\tdefer recvWG.Done()\n\t\t\tbuf := make([]byte, 64*1024)\n\t\t\t// Set read deadline once to avoid blocking forever\n\t\t\tconn.SetReadDeadline(time.Now().Add(5 * time.Second))"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In internal/server/ebpf.go, for the 'agent' policy, how is the pebble_agent_state.active field initialized relative to cfg.Workers?",
+            "answer": {
+              "answer": "For the 'agent' policy, the pebble_agent_state.active field is initialized to the same value as cfg.Workers. After validating that workers is non-negative, the code creates an AgentSelectorAgentState with Active set to uint32(workers) and writes it into the PebbleAgentState map under key 0.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func loadAgent(workers int) (*ebpfPolicy, error) {\n\t...\n\tif workers < 0 {\n\t\tobjs.Close()\n\t\treturn nil, ErrInvalidConfig(\"workers must be non-negative\")\n\t}\n\n\tvar key uint32 = 0\n\tstate := ebpfutil.AgentSelectorAgentState{\n\t\tActive: uint32(workers),\n\t}\n\tif objs.PebbleAgentState != nil {\n\t\tif err := objs.PebbleAgentState.Update(&key, &state, ebpf.UpdateAny); err != nil {\n\t\t\tobjs.Close()\n\t\t\treturn nil, fmt.Errorf(\"configure agent state: %w\", err)\n\t\t}\n\t}\n\t...\n}"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In internal/server/ebpf.go\u2019s updateTargetsMap (or equivalent), are entries written into pebble_udp_targets for every worker index from 0 up to cfg.Workers-1, or only for a subset of workers?",
+            "answer": {
+              "answer": "Entries in pebble_udp_targets are maintained for every worker index from 0 up to numSlots-1. The helper that writes entries, updateTargetsMap, takes an explicit slot (key) and always updates that slot in the pinned reuseport map. The corresponding clearTargets function iterates from key 0 up to key numSlots-1 and deletes each key, which implies the intended usage is a contiguous range of slots covering all workers rather than a sparse subset.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func updateTargetsMap(slot uint32, fd int) error {\n\tm, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n\tif err != nil {\n\t\treturn fmt.Errorf(\"load target map: %w\", err)\n\t}\n\tdefer m.Close()\n\n\tvalue := uint32(fd)\n\tif err := m.Update(&slot, &value, ebpf.UpdateAny); err != nil {\n\t\treturn fmt.Errorf(\"update target map: %w\", err)\n\t}\n\treturn nil\n}\n\nfunc clearTargets(numSlots int) error {\n\tm, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n\tif err != nil {\n\t\tif errors.Is(err, fs.ErrNotExist) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\t}\n\tdefer m.Close()\n\n\tfor i := 0; i < numSlots; i++ {\n\t\tkey := uint32(i)\n\t\tif err := m.Delete(&key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {\n\t\t\treturn fmt.Errorf(\"clear slot %d: %w\", i, err)\n\t\t}\n\t}\n\treturn nil\n}\n"
+                },
+                {
+                  "path": "ebpf/agent.c",
+                  "snippet": "struct {\n    __uint(type, BPF_MAP_TYPE_REUSEPORT_SOCKARRAY);\n    __uint(max_entries, 128);\n    __type(key, __u32);\n    __type(value, __u32);\n    __uint(pinning, LIBBPF_PIN_BY_NAME);\n} pebble_udp_targets SEC(\".maps\");\n"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In internal/server/server.go\u2019s startStatsLogger, does the logger skip printing a 'worker=N' line for workers that had zero requests in the last interval (or since server start), or does it always print all workers regardless of activity?",
+            "answer": {
+              "answer": "The logger skips printing a `worker=N` line for workers that had zero requests in the last interval. For each worker, it only logs when `snap.getCount > 0` or `snap.scanCount > 0`, so inactive workers in that interval are not printed.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/server.go",
+                  "snippet": "for i := range s.stats {\n\t\t\t\tsnap := s.stats[i].snapshotAndReset()\n\t\t\t\tif snap.getCount > 0 || snap.scanCount > 0 {\n\t\t\t\t\tvar workerAvgGet time.Duration\n\t\t\t\t\tif snap.getCount > 0 {\n\t\t\t\t\t\tworkerAvgGet = time.Duration(int64(snap.getLatency) / int64(snap.getCount))\n\t\t\t\t\t}\n\t\t\t\t\tvar workerAvgScan time.Duration\n\t\t\t\t\tif snap.scanCount > 0 {\n\t\t\t\t\t\tworkerAvgScan = time.Duration(int64(snap.scanLatency) / int64(snap.scanCount))\n\t\t\t\t\t}\n\t\t\t\t\ts.logger.Printf(\n\t\t\t\t\t\t\"[perf] worker=%d gets=%d get_errors=%d avg_get=%s scans=%d scan_errors=%d avg_scan=%s\",\n\t\t\t\t\t\ti,\n\t\t\t\t\t\tsnap.getCount,\n\t\t\t\t\t\tsnap.getErrors,\n\t\t\t\t\t\tworkerAvgGet,\n\t\t\t\t\t\tsnap.scanCount,\n\t\t\t\t\t\tsnap.scanErrors,\n\t\t\t\t\t\tworkerAvgScan,\n\t\t\t\t\t)\n\t\t\t\t}\n\t\t\t\ttotal.getCount += snap.getCount\n\t\t\t\t...\n\t\t\t}\n"
+                }
+              ]
+            }
+          }
+        ],
+        "iteration_type": "question"
+      },
+      {
+        "iteration": 1,
+        "assistant_role": "assistant",
+        "assistant_content_format": "json",
+        "assistant_content_raw": "{\"status\":\"finish\",\"Summary\":\"RAG confirms that each client send worker creates its own UDPConn (7 total flows), the agent eBPF state\u2019s `active` field is set exactly to the configured worker count (6), the reuseport sockarray is populated contiguously for all workers, and the stats logger only prints workers that handled any traffic. Across all runs, the perf logs consistently show only ~4 of 6 workers ever receiving requests, which is exactly what you expect when a pure hash%6 selector spreads 7 long-lived flows: about four bins become non-empty while two stay idle. With only four hot workers, capacity tops out around 80\u201390k replies/s; at 50\u201360k RPS the system is under capacity and latency is low, but at \u226580k RPS the offered load matches or exceeds this 4\u2011worker capacity. The hot workers\u2019 socket queues then back up and the kernel drops excess UDP packets, so many requests never receive replies and completed ones can sit queued for seconds, producing the multi\u2011second client p99 latencies and large \u201cresponses missing\u201d warnings at higher rates.\",\"hypothesis\":{\"text\":\"Because the agent selector does pure hash-based `slot = hash % active` steering and the client only opens 7 long-lived UDP flows, packets are deterministically mapped onto only about four of the six reuseport sockets, leaving two workers idle. This reduces effective server parallelism to ~4 workers, capping throughput near 80\u201390k replies/s. When the client drives \u226580k RPS open-loop, those four hot workers\u2019 socket queues saturate, causing UDP drops and multi-second queuing on the hot sockets, which manifests as very large client p99 latencies and many missing responses, even though per-request in-process times on the server remain ~10\u00b5s/2ms.\",\"score\":8},\"questions\":[]}",
+        "full_response": {
+          "id": "chatcmpl-CdjDToLOacWFtZ4XNiPAeBGh0FidP",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "logprobs": null,
+              "message": {
+                "content": "{\"status\":\"finish\",\"Summary\":\"RAG confirms that each client send worker creates its own UDPConn (7 total flows), the agent eBPF state\u2019s `active` field is set exactly to the configured worker count (6), the reuseport sockarray is populated contiguously for all workers, and the stats logger only prints workers that handled any traffic. Across all runs, the perf logs consistently show only ~4 of 6 workers ever receiving requests, which is exactly what you expect when a pure hash%6 selector spreads 7 long-lived flows: about four bins become non-empty while two stay idle. With only four hot workers, capacity tops out around 80\u201390k replies/s; at 50\u201360k RPS the system is under capacity and latency is low, but at \u226580k RPS the offered load matches or exceeds this 4\u2011worker capacity. The hot workers\u2019 socket queues then back up and the kernel drops excess UDP packets, so many requests never receive replies and completed ones can sit queued for seconds, producing the multi\u2011second client p99 latencies and large \u201cresponses missing\u201d warnings at higher rates.\",\"hypothesis\":{\"text\":\"Because the agent selector does pure hash-based `slot = hash % active` steering and the client only opens 7 long-lived UDP flows, packets are deterministically mapped onto only about four of the six reuseport sockets, leaving two workers idle. This reduces effective server parallelism to ~4 workers, capping throughput near 80\u201390k replies/s. When the client drives \u226580k RPS open-loop, those four hot workers\u2019 socket queues saturate, causing UDP drops and multi-second queuing on the hot sockets, which manifests as very large client p99 latencies and many missing responses, even though per-request in-process times on the server remain ~10\u00b5s/2ms.\",\"score\":8},\"questions\":[]}",
+                "refusal": null,
+                "role": "assistant",
+                "annotations": [],
+                "audio": null,
+                "function_call": null,
+                "tool_calls": null
+              }
+            }
+          ],
+          "created": 1763584639,
+          "model": "gpt-5.1-2025-11-13",
+          "object": "chat.completion",
+          "service_tier": "default",
+          "system_fingerprint": null,
+          "usage": {
+            "completion_tokens": 14753,
+            "prompt_tokens": 22345,
+            "total_tokens": 37098,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 14358,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 19072
+            }
+          }
+        },
+        "status": "finish",
+        "Summary": "RAG confirms that each client send worker creates its own UDPConn (7 total flows), the agent eBPF state\u2019s `active` field is set exactly to the configured worker count (6), the reuseport sockarray is populated contiguously for all workers, and the stats logger only prints workers that handled any traffic. Across all runs, the perf logs consistently show only ~4 of 6 workers ever receiving requests, which is exactly what you expect when a pure hash%6 selector spreads 7 long-lived flows: about four bins become non-empty while two stay idle. With only four hot workers, capacity tops out around 80\u201390k replies/s; at 50\u201360k RPS the system is under capacity and latency is low, but at \u226580k RPS the offered load matches or exceeds this 4\u2011worker capacity. The hot workers\u2019 socket queues then back up and the kernel drops excess UDP packets, so many requests never receive replies and completed ones can sit queued for seconds, producing the multi\u2011second client p99 latencies and large \u201cresponses missing\u201d warnings at higher rates.",
+        "hypothesis": {
+          "text": "Because the agent selector does pure hash-based `slot = hash % active` steering and the client only opens 7 long-lived UDP flows, packets are deterministically mapped onto only about four of the six reuseport sockets, leaving two workers idle. This reduces effective server parallelism to ~4 workers, capping throughput near 80\u201390k replies/s. When the client drives \u226580k RPS open-loop, those four hot workers\u2019 socket queues saturate, causing UDP drops and multi-second queuing on the hot sockets, which manifests as very large client p99 latencies and many missing responses, even though per-request in-process times on the server remain ~10\u00b5s/2ms.",
+          "score": 8
+        },
+        "questions": [],
+        "question_answers": [],
+        "iteration_type": "question"
+      },
+      {
+        "iteration": 2,
+        "assistant_role": "assistant",
+        "assistant_content_format": "json",
+        "assistant_content_raw": "{\"status\":\"finish\",\"Summary\":\"The agent eBPF selector deterministically maps each incoming UDP packet to a reuseport socket as `slot = hash % active` with `active=6` workers and a fully populated sockarray. In all runs, the server\u2019s perf logs show that only 4 of the 6 workers ever receive any requests, and the particular 4 change from run to run, consistent with a fixed (but small) set of client UDP 5\u2011tuples being hashed into only 4 of the 6 slots per run. At 50\u201360k RPS this 4\u2011worker capacity still exceeds the offered load, so p99 latency stays low and no responses are missing. At \u226580k RPS the offered load exceeds what 4 workers can process, so those workers\u2019 socket queues fill, UDP packets are dropped, the client\u2019s outstanding count grows steadily, many responses are never seen, and the few completed requests experience seconds of queuing delay\u2014producing the multi\u2011second p99 latencies observed even though per\u2011request service times on the server remain near the configured 10\u00b5s/2ms busy\u2011waits.\",\"hypothesis\":{\"text\":\"Because the agent selector uses a pure flow-hash modulo the active worker count, and the client sends over only a small fixed set of UDP flows, all packets concentrate on about four of the six reuseport sockets in each run, leaving two workers idle. This reduces effective server parallelism to roughly four workers, capping sustainable throughput around 80\u201390k replies/s; when the client drives \u226580k RPS open-loop, those hot sockets and workers become overloaded, causing UDP drops and multi-second queuing, which manifests as very large client p99 latencies and many missing responses despite constant per-request processing cost.\",\"score\":8},\"questions\":[]}",
+        "full_response": {
+          "id": "chatcmpl-CdjGnmZSpXGPk1a9VCSeDB0T4prXJ",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "logprobs": null,
+              "message": {
+                "content": "{\"status\":\"finish\",\"Summary\":\"The agent eBPF selector deterministically maps each incoming UDP packet to a reuseport socket as `slot = hash % active` with `active=6` workers and a fully populated sockarray. In all runs, the server\u2019s perf logs show that only 4 of the 6 workers ever receive any requests, and the particular 4 change from run to run, consistent with a fixed (but small) set of client UDP 5\u2011tuples being hashed into only 4 of the 6 slots per run. At 50\u201360k RPS this 4\u2011worker capacity still exceeds the offered load, so p99 latency stays low and no responses are missing. At \u226580k RPS the offered load exceeds what 4 workers can process, so those workers\u2019 socket queues fill, UDP packets are dropped, the client\u2019s outstanding count grows steadily, many responses are never seen, and the few completed requests experience seconds of queuing delay\u2014producing the multi\u2011second p99 latencies observed even though per\u2011request service times on the server remain near the configured 10\u00b5s/2ms busy\u2011waits.\",\"hypothesis\":{\"text\":\"Because the agent selector uses a pure flow-hash modulo the active worker count, and the client sends over only a small fixed set of UDP flows, all packets concentrate on about four of the six reuseport sockets in each run, leaving two workers idle. This reduces effective server parallelism to roughly four workers, capping sustainable throughput around 80\u201390k replies/s; when the client drives \u226580k RPS open-loop, those hot sockets and workers become overloaded, causing UDP drops and multi-second queuing, which manifests as very large client p99 latencies and many missing responses despite constant per-request processing cost.\",\"score\":8},\"questions\":[]}",
+                "refusal": null,
+                "role": "assistant",
+                "annotations": [],
+                "audio": null,
+                "function_call": null,
+                "tool_calls": null
+              }
+            }
+          ],
+          "created": 1763584845,
+          "model": "gpt-5.1-2025-11-13",
+          "object": "chat.completion",
+          "service_tier": "default",
+          "system_fingerprint": null,
+          "usage": {
+            "completion_tokens": 8890,
+            "prompt_tokens": 22822,
+            "total_tokens": 31712,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 8506,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 22272
+            }
+          }
+        },
+        "status": "finish",
+        "Summary": "The agent eBPF selector deterministically maps each incoming UDP packet to a reuseport socket as `slot = hash % active` with `active=6` workers and a fully populated sockarray. In all runs, the server\u2019s perf logs show that only 4 of the 6 workers ever receive any requests, and the particular 4 change from run to run, consistent with a fixed (but small) set of client UDP 5\u2011tuples being hashed into only 4 of the 6 slots per run. At 50\u201360k RPS this 4\u2011worker capacity still exceeds the offered load, so p99 latency stays low and no responses are missing. At \u226580k RPS the offered load exceeds what 4 workers can process, so those workers\u2019 socket queues fill, UDP packets are dropped, the client\u2019s outstanding count grows steadily, many responses are never seen, and the few completed requests experience seconds of queuing delay\u2014producing the multi\u2011second p99 latencies observed even though per\u2011request service times on the server remain near the configured 10\u00b5s/2ms busy\u2011waits.",
+        "hypothesis": {
+          "text": "Because the agent selector uses a pure flow-hash modulo the active worker count, and the client sends over only a small fixed set of UDP flows, all packets concentrate on about four of the six reuseport sockets in each run, leaving two workers idle. This reduces effective server parallelism to roughly four workers, capping sustainable throughput around 80\u201390k replies/s; when the client drives \u226580k RPS open-loop, those hot sockets and workers become overloaded, causing UDP drops and multi-second queuing, which manifests as very large client p99 latencies and many missing responses despite constant per-request processing cost.",
+          "score": 8
+        },
+        "questions": [],
+        "question_answers": [],
+        "iteration_type": "final"
+      }
+    ]
+  }
+]

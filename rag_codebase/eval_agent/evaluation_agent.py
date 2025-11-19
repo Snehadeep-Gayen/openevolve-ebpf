@@ -303,7 +303,7 @@ if __name__ == "__main__":
 
     for iteration_index in range(question_iterations):
         response = make_llm_call(
-            {"model": model, "messages": message_history, "temperature": temperature}
+            {"model": model, "messages": message_history, "reasoning_effort": "high"}
         )
         response_json = response.model_dump()
         assistant_message = response.choices[0].message
@@ -372,7 +372,7 @@ if __name__ == "__main__":
     final_prompt = _format_final_prompt(iteration_records)
     message_history.append({"role": "user", "content": final_prompt})
     final_response = make_llm_call(
-        {"model": model, "messages": message_history, "temperature": temperature}
+        {"model": model, "messages": message_history, "reasoning_effort": "high"}
     )
     final_response_json = final_response.model_dump()
     final_assistant_message = final_response.choices[0].message
