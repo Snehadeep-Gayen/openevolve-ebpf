@@ -1,0 +1,764 @@
+// here it invalidates the hypothesis but it isn't able to actually solve the problem with a correct hypothesis and it gets SO stuck on this map not being full even when it has evidence against it.
+[
+  {
+    "iterations": [
+      {
+        "iteration": 0,
+        "assistant_role": "assistant",
+        "assistant_content": {
+          "status": "continue",
+          "Summary": "New agent eBPF selector replaces the prior unrolled 128-iteration loop with a single-slot selection based on reuse->hash % active (or bitmask for power-of-two). Metrics show low p99 at 50\u201360k rps (~5 ms), but catastrophic tail latency and massive response loss starting at 80k rps (p99 ~4.9\u20136.5 seconds, with 100k\u2013360k missing responses). Server perf logs show per-worker processing times and throughput remaining healthy and roughly balanced, suggesting the bottleneck is in UDP packet handling / queueing rather than the synthetic GET/SCAN work itself. Parent program had milder but still severe degradation at high load; the new program is worse overall, especially beyond 80k rps.",
+          "hypothesis": {
+            "text": "The agent policy\u2019s active worker count and reuseport sockarray population in the Go server do not match the actual number of listening workers, causing the eBPF selector to steer traffic only to a subset of sockets. This overloads a few workers\u2019 UDP receive queues while others stay underutilized, leading to large backlogs, packet drops, and extreme tail latency at higher request rates.",
+            "score": 7
+          },
+          "questions": [
+            "In internal/server/ebpf.go\u2019s loadEBPF path for the \"agent\" policy, how is PebbleAgentState.Active initialized relative to the configured number of workers, and is it ever updated afterward?",
+            "In internal/server/server.go\u2019s Server.Run, does updateTargetsMap write every worker\u2019s UDP socket fd into the pebble_udp_targets map, and what key indices does it use for each worker?",
+            "In internal/server/server.go\u2019s openWorker/spawnWorker logic, are all configured workers actually created and bound with SO_REUSEPORT on the same address/port when the agent policy is active, or is any worker skipped or using a different socket?",
+            "Does the server attach the eBPF reuseport program only once (to a single socket) or to each worker socket, and where in internal/server/server.go is this done for the agent policy?",
+            "In cmd/workload_client/main.go, how many send workers are created relative to the -send-workers flag, and is there any per-worker key or flow pattern that could bias reuse->hash so that a small subset of sockets receives most traffic when active < total workers?"
+          ]
+        },
+        "assistant_content_format": "json",
+        "assistant_content_raw": "{\"status\":\"continue\",\"Summary\":\"New agent eBPF selector replaces the prior unrolled 128-iteration loop with a single-slot selection based on reuse->hash % active (or bitmask for power-of-two). Metrics show low p99 at 50\u201360k rps (~5 ms), but catastrophic tail latency and massive response loss starting at 80k rps (p99 ~4.9\u20136.5 seconds, with 100k\u2013360k missing responses). Server perf logs show per-worker processing times and throughput remaining healthy and roughly balanced, suggesting the bottleneck is in UDP packet handling / queueing rather than the synthetic GET/SCAN work itself. Parent program had milder but still severe degradation at high load; the new program is worse overall, especially beyond 80k rps.\",\"hypothesis\":{\"text\":\"The agent policy\u2019s active worker count and reuseport sockarray population in the Go server do not match the actual number of listening workers, causing the eBPF selector to steer traffic only to a subset of sockets. This overloads a few workers\u2019 UDP receive queues while others stay underutilized, leading to large backlogs, packet drops, and extreme tail latency at higher request rates.\",\"score\":7},\"questions\":[\"In internal/server/ebpf.go\u2019s loadEBPF path for the \\\"agent\\\" policy, how is PebbleAgentState.Active initialized relative to the configured number of workers, and is it ever updated afterward?\",\"In internal/server/server.go\u2019s Server.Run, does updateTargetsMap write every worker\u2019s UDP socket fd into the pebble_udp_targets map, and what key indices does it use for each worker?\",\"In internal/server/server.go\u2019s openWorker/spawnWorker logic, are all configured workers actually created and bound with SO_REUSEPORT on the same address/port when the agent policy is active, or is any worker skipped or using a different socket?\",\"Does the server attach the eBPF reuseport program only once (to a single socket) or to each worker socket, and where in internal/server/server.go is this done for the agent policy?\",\"In cmd/workload_client/main.go, how many send workers are created relative to the -send-workers flag, and is there any per-worker key or flow pattern that could bias reuse->hash so that a small subset of sockets receives most traffic when active < total workers?\"]}",
+        "full_response": {
+          "id": "chatcmpl-CdNHRERYgXjlwM04DVrnq2zKGfd7G",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "logprobs": null,
+              "message": {
+                "content": "{\"status\":\"continue\",\"Summary\":\"New agent eBPF selector replaces the prior unrolled 128-iteration loop with a single-slot selection based on reuse->hash % active (or bitmask for power-of-two). Metrics show low p99 at 50\u201360k rps (~5 ms), but catastrophic tail latency and massive response loss starting at 80k rps (p99 ~4.9\u20136.5 seconds, with 100k\u2013360k missing responses). Server perf logs show per-worker processing times and throughput remaining healthy and roughly balanced, suggesting the bottleneck is in UDP packet handling / queueing rather than the synthetic GET/SCAN work itself. Parent program had milder but still severe degradation at high load; the new program is worse overall, especially beyond 80k rps.\",\"hypothesis\":{\"text\":\"The agent policy\u2019s active worker count and reuseport sockarray population in the Go server do not match the actual number of listening workers, causing the eBPF selector to steer traffic only to a subset of sockets. This overloads a few workers\u2019 UDP receive queues while others stay underutilized, leading to large backlogs, packet drops, and extreme tail latency at higher request rates.\",\"score\":7},\"questions\":[\"In internal/server/ebpf.go\u2019s loadEBPF path for the \\\"agent\\\" policy, how is PebbleAgentState.Active initialized relative to the configured number of workers, and is it ever updated afterward?\",\"In internal/server/server.go\u2019s Server.Run, does updateTargetsMap write every worker\u2019s UDP socket fd into the pebble_udp_targets map, and what key indices does it use for each worker?\",\"In internal/server/server.go\u2019s openWorker/spawnWorker logic, are all configured workers actually created and bound with SO_REUSEPORT on the same address/port when the agent policy is active, or is any worker skipped or using a different socket?\",\"Does the server attach the eBPF reuseport program only once (to a single socket) or to each worker socket, and where in internal/server/server.go is this done for the agent policy?\",\"In cmd/workload_client/main.go, how many send workers are created relative to the -send-workers flag, and is there any per-worker key or flow pattern that could bias reuse->hash so that a small subset of sockets receives most traffic when active < total workers?\"]}",
+                "refusal": null,
+                "role": "assistant",
+                "annotations": [],
+                "audio": null,
+                "function_call": null,
+                "tool_calls": null
+              }
+            }
+          ],
+          "created": 1763500317,
+          "model": "gpt-5.1-2025-11-13",
+          "object": "chat.completion",
+          "service_tier": "default",
+          "system_fingerprint": null,
+          "usage": {
+            "completion_tokens": 494,
+            "prompt_tokens": 20145,
+            "total_tokens": 20639,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 0
+            }
+          }
+        },
+        "rag_results": [
+          {
+            "question": "In internal/server/ebpf.go\u2019s loadEBPF path for the \"agent\" policy, how is PebbleAgentState.Active initialized relative to the configured number of workers, and is it ever updated afterward?",
+            "answer": {
+              "answer": "For the \"agent\" policy, PebbleAgentState.Active is set once to the configured number of workers when loadAgent is called: the state struct is created with Active: uint32(workers) and written into the PebbleAgentState map with key 0. If workers is negative, the function returns an error instead of initializing the state. After this initial Update call, there is no further modification of PebbleAgentState.Active in this code path.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func loadAgent(workers int) (*ebpfPolicy, error) {\n\t...\n\tif workers < 0 {\n\t\tobjs.Close()\n\t\treturn nil, ErrInvalidConfig(\"workers must be non-negative\")\n\t}\n\n\tvar key uint32 = 0\n\tstate := ebpfutil.AgentSelectorAgentState{\n\t\tActive: uint32(workers),\n\t}\n\tif objs.PebbleAgentState != nil {\n\t\tif err := objs.PebbleAgentState.Update(&key, &state, ebpf.UpdateAny); err != nil {\n\t\t\tobjs.Close()\n\t\t\treturn nil, fmt.Errorf(\"configure agent state: %w\", err)\n\t\t}\n\t}\n\n\treturn &ebpfPolicy{\n\t\tname:    \"agent\",\n\t\tprogram: objs.AgentUdpSelector,\n\t\tclose:   objs.Close,\n\t}, nil\n}\n"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In internal/server/server.go\u2019s Server.Run, does updateTargetsMap write every worker\u2019s UDP socket fd into the pebble_udp_targets map, and what key indices does it use for each worker?",
+            "answer": {
+              "answer": "Yes. For each worker that is opened in Server.Run, the file descriptor returned by openWorker is written into the pebble_udp_targets eBPF map via updateTargetsMap. The key used is the worker\u2019s index (cast to uint32), so worker 0 is stored at slot/key 0, worker 1 at slot/key 1, and so on up through the number of workers. Entries are later cleared by iterating the same 0..numSlots-1 index range.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func updateTargetsMap(slot uint32, fd int) error {\n\tm, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n\tif err != nil {\n\t\treturn fmt.Errorf(\"load target map: %w\", err)\n\t}\n\tdefer m.Close()\n\n\tvalue := uint32(fd)\n\tif err := m.Update(&slot, &value, ebpf.UpdateAny); err != nil {\n\t\treturn fmt.Errorf(\"update target map: %w\", err)\n\t}\n\treturn nil\n}\n\nfunc clearTargets(numSlots int) error {\n\tm, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n\tif err != nil {\n\t\tif errors.Is(err, fs.ErrNotExist) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\t}\n\tdefer m.Close()\n\n\tfor i := 0; i < numSlots; i++ {\n\t\tkey := uint32(i)\n\t\tif err := m.Delete(&key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {\n\t\t\treturn fmt.Errorf(\"clear slot %d: %w\", i, err)\n\t\t}\n\t}\n\treturn nil\n}\n"
+                },
+                {
+                  "path": "internal/server/server.go",
+                  "snippet": "func (s *Server) openWorker(idx int) (*net.UDPConn, int, error) {\n\tattachPolicy := s.policy != nil && s.policy.program != nil && idx == 0\n\tvar attachErr error\n\n\tlc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {\n\t\treturn c.Control(func(fd uintptr) {\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEADDR: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEPORT: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif attachPolicy && attachErr == nil {\n\t\t\t\tif err := s.policy.attach(int(fd)); err != nil {\n\t\t\t\t\tattachErr = err\n\t\t\t\t}\n\t\t\t}\n\t\t})\n\t}}\n\n\tpc, err := lc.ListenPacket(context.Background(), \"udp\", s.cfg.ListenAddr)\n\tif err != nil {\n\t\treturn nil, -1, err\n\t}\n\tif attachErr != nil {\n\t\tpc.Close()\n\t\treturn nil, -1, attachErr\n\t}\n\n\tudpConn := pc.(*net.UDPConn)\n\tvar fd int\n\traw, err := udpConn.SyscallConn()\n\tif err != nil {\n\t\tudpConn.Close()\n\t\treturn nil, -1, err\n\t}\n\tif err := raw.Control(func(value uintptr) {\n\t\tfd = int(value)\n\t}); err != nil {\n\t\tudpConn.Close()\n\t\treturn nil, -1, err\n\t}\n\n\treturn udpConn, fd, nil\n}\n"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In internal/server/server.go\u2019s openWorker/spawnWorker logic, are all configured workers actually created and bound with SO_REUSEPORT on the same address/port when the agent policy is active, or is any worker skipped or using a different socket?",
+            "answer": {
+              "answer": "All configured workers are created, and each gets its own UDP socket with SO_REUSEPORT set on the same listen address/port. The first worker (idx == 0) is the only one where the eBPF agent policy is attached, but the rest still call openWorker and receive sockets with both SO_REUSEADDR and SO_REUSEPORT configured. No workers are skipped and no worker uses a different address/port; each worker\u2019s goroutine spawned by spawnWorker reads from and writes to its own UDPConn bound to the configured s.cfg.ListenAddr.\n\nSpecifically, openWorker always calls ListenPacket on s.cfg.ListenAddr, sets SO_REUSEADDR and SO_REUSEPORT on the new socket, and only conditionally attaches the policy when idx == 0. spawnWorker is then invoked for each worker index, running a goroutine that serves requests on that per-worker UDPConn.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/server.go",
+                  "snippet": "func (s *Server) openWorker(idx int) (*net.UDPConn, int, error) {\n\tattachPolicy := s.policy != nil && s.policy.program != nil && idx == 0\n\tvar attachErr error\n\n\tlc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {\n\t\treturn c.Control(func(fd uintptr) {\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEADDR: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEPORT: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif attachPolicy && attachErr == nil {\n\t\t\t\tif err := s.policy.attach(int(fd)); err != nil {\n\t\t\t\t\tattachErr = err\n\t\t\t\t}\n\t\t\t}\n\t\t})\n\t}}\n\n\tpc, err := lc.ListenPacket(context.Background(), \"udp\", s.cfg.ListenAddr)\n\tif err != nil {\n\t\treturn nil, -1, err\n\t}\n\tif attachErr != nil {\n\t\tpc.Close()\n\t\treturn nil, -1, attachErr\n\t}\n\n\tudpConn := pc.(*net.UDPConn)\n\t...\n\treturn udpConn, fd, nil\n}\n"
+                },
+                {
+                  "path": "internal/server/server.go",
+                  "snippet": "func (s *Server) spawnWorker(ctx context.Context, idx int, conn *net.UDPConn) {\n\ts.wg.Add(1)\n\tgo func() {\n\t\tdefer s.wg.Done()\n\t\tbuf := make([]byte, 16*1024)\n\n\t\tfor {\n\t\t\tn, addr, err := conn.ReadFromUDP(buf)\n\t\t\tif err != nil {\n\t\t\t\tselect {\n\t\t\t\tcase <-ctx.Done():\n\t\t\t\t\treturn\n\t\t\t\tdefault:\n\t\t\t\t}\n\t\t\t\tif errors.Is(err, net.ErrClosed) {\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\ts.logger.Printf(\"worker=%d read error: %v\", idx, err)\n\t\t\t\tcontinue\n\t\t\t}\n\n\t\t\tresponse := s.handleRequest(idx, buf[:n])\n\t\t\tif response == nil {\n\t\t\t\tcontinue\n\t\t\t}\n\n\t\t\tif _, err := conn.WriteToUDP(response, addr); err != nil {\n\t\t\t\tif errors.Is(err, net.ErrClosed) {\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\ts.logger.Printf(\"worker=%d write error: %v\", idx, err)\n\t\t\t}\n\t\t}\n\t}()\n}\n"
+                },
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func loadAgent(workers int) (*ebpfPolicy, error) {\n\t...\n\tstate := ebpfutil.AgentSelectorAgentState{\n\t\tActive: uint32(workers),\n\t}\n\tif objs.PebbleAgentState != nil {\n\t\tif err := objs.PebbleAgentState.Update(&key, &state, ebpf.UpdateAny); err != nil {\n\t\t\tobjs.Close()\n\t\t\treturn nil, fmt.Errorf(\"configure agent state: %w\", err)\n\t\t}\n\t}\n\n\treturn &ebpfPolicy{\n\t\tname:    \"agent\",\n\t\tprogram: objs.AgentUdpSelector,\n\t\tclose:   objs.Close,\n\t}, nil\n}\n"
+                }
+              ]
+            }
+          },
+          {
+            "question": "Does the server attach the eBPF reuseport program only once (to a single socket) or to each worker socket, and where in internal/server/server.go is this done for the agent policy?",
+            "answer": {
+              "answer": "The eBPF reuseport program is attached only once, to a single socket\u2014the first worker\u2019s socket. In internal/server/server.go, this is controlled in Server.openWorker by the attachPolicy flag, which is true only when idx == 0, and then the policy is attached inside the net.ListenConfig.Control callback:\n\n- attachPolicy is computed as: s.policy != nil && s.policy.program != nil && idx == 0\n- When attachPolicy is true, the eBPF policy\u2019s attach method is invoked on that socket\u2019s file descriptor inside the Control function.\n\nAll subsequent workers (idx > 0) create sockets with SO_REUSEPORT but do not have the eBPF program attached again.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/server.go",
+                  "snippet": "func (s *Server) openWorker(idx int) (*net.UDPConn, int, error) {\n\tattachPolicy := s.policy != nil && s.policy.program != nil && idx == 0\n\tvar attachErr error\n\n\tlc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {\n\t\treturn c.Control(func(fd uintptr) {\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEADDR: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEPORT: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif attachPolicy && attachErr == nil {\n\t\t\t\tif err := s.policy.attach(int(fd)); err != nil {\n\t\t\t\t\tattachErr = err\n\t\t\t\t}\n\t\t\t}\n\t\t})\n\t}}\n\n\tpc, err := lc.ListenPacket(context.Background(), \"udp\", s.cfg.ListenAddr)\n\tif err != nil {\n\t\treturn nil, -1, err\n\t}\n\tif attachErr != nil {\n\t\tpc.Close()\n\t\treturn nil, -1, attachErr\n\t}\n\n\tudpConn := pc.(*net.UDPConn)\n\t...\n\treturn udpConn, fd, nil\n}\n"
+                },
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func loadAgent(workers int) (*ebpfPolicy, error) {\n\t...\n\tstate := ebpfutil.AgentSelectorAgentState{\n\t\tActive: uint32(workers),\n\t}\n\tif objs.PebbleAgentState != nil {\n\t\tif err := objs.PebbleAgentState.Update(&key, &state, ebpf.UpdateAny); err != nil {\n\t\t\tobjs.Close()\n\t\t\treturn nil, fmt.Errorf(\"configure agent state: %w\", err)\n\t\t}\n\t}\n\n\treturn &ebpfPolicy{\n\t\tname:    \"agent\",\n\t\tprogram: objs.AgentUdpSelector,\n\t\tclose:   objs.Close,\n\t}, nil\n}\n"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In cmd/workload_client/main.go, how many send workers are created relative to the -send-workers flag, and is there any per-worker key or flow pattern that could bias reuse->hash so that a small subset of sockets receives most traffic when active < total workers?",
+            "answer": {
+              "answer": "The number of send workers is taken directly from the -send-workers flag, except that any non\u2011positive value is clamped to 1. After parsing flags, the code does:\n\n- `workers := *sendWorkers`\n- `if workers <= 0 { workers = 1 }`\n- `for i := 0; i < workers; i++ { ... }`\n\nso exactly `send-workers` concurrent send goroutines are created (or 1 if the flag is \u2264 0).\n\nEach worker opens its own UDP connection with:\n- `conn, err := net.DialUDP(\"udp\", nil, udpAddr)` inside the `for i := 0; i < workers; i++` loop.\n\nPer worker, the only differentiation is:\n- A per\u2011worker RNG seeded as `time.Now().UnixNano() + int64(i)`.\n- A `workerID := i` passed to the goroutine (only used for logging).\n\nRequests are generated in a loop using:\n- `rng.Float64()` to decide between GET and SCAN based on the global `-get-frac` flag.\n- `buildPayload(...)` with the same global `-key-prefix`, `-key-space`, and `-scan-limit` parameters.\n- `makeReqID(time.Now().UnixNano(), currSeq, isGet)` where `currSeq` is a single global atomic counter shared by all workers.\n\nNo per\u2011worker key range, prefix, or flow identifier is introduced, and all workers share the same global key space and sequence counter. As a result, there is no explicit per\u2011worker key or flow pattern designed to bias reuse or hashing toward a small subset of sockets; traffic generation is symmetric across workers and governed by shared parameters, with only minor differences from per\u2011worker RNG seeds and timing.",
+              "code_snippets": [
+                {
+                  "path": "cmd/workload_client/main.go",
+                  "snippet": "var (\n\t\tserverAddr  = flag.String(\"server\", \"127.0.0.1:9000\", \"UDP server address\")\n\t\t...\n\t\tsendWorkers = flag.Int(\"send-workers\", 1, \"number of concurrent send workers\")\n\t)\n\tflag.Parse()\n\n\tworkers := *sendWorkers\n\tif workers <= 0 {\n\t\tworkers = 1\n\t}\n\n\t...\n\n\tudpAddr, err := net.ResolveUDPAddr(\"udp\", *serverAddr)\n\t...\n\tfor i := 0; i < workers; i++ {"
+                },
+                {
+                  "path": "cmd/workload_client/main.go",
+                  "snippet": "for i := 0; i < workers; i++ {\n\t\tconn, err := net.DialUDP(\"udp\", nil, udpAddr)\n\t\tif err != nil {\n\t\t\tlogger.Fatalf(\"dial udp worker=%d: %v\", i, err)\n\t\t}\n\t\tdefer conn.Close()\n\n\t\tseed := time.Now().UnixNano() + int64(i)\n\t\trng := rand.New(rand.NewSource(seed))\n\n\t\tworkerID := i\n\n\t\tsendWG.Add(1)\n\t\tgo func(workerID int, conn *net.UDPConn, rng *rand.Rand) {"
+                },
+                {
+                  "path": "cmd/workload_client/main.go",
+                  "snippet": "go func(workerID int, conn *net.UDPConn, rng *rand.Rand) {\n\t\t\tdefer sendWG.Done()\n\t\t\tbuf := make([]byte, 0, 256)\n\t\t\tfor {\n\t\t\t\tif err := limiter.Wait(ctx); err != nil {\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\tcurrSeq := atomic.AddUint64(&seq, 1) - 1\n\t\t\t\tisGet := true\n\t\t\t\treqType := \"GET\"\n\t\t\t\tif rng.Float64() > *getFrac {\n\t\t\t\t\treqType = \"SCAN\"\n\t\t\t\t\tisGet = false\n\t\t\t\t}\n\t\t\t\t// Capture timestamp, build payload, and send immediately\n\t\t\t\treqID := makeReqID(time.Now().UnixNano(), currSeq, isGet)\n\t\t\t\tpayload := buildPayload(rng, buf, reqType, reqID, *keyPrefix, *keySpace, *scanLimit)\n\t\t\t\tif _, err := conn.Write(payload); err != nil {\n\t\t\t\t\tlogger.Printf(\"write error (worker=%d): %v\", workerID, err)\n\t\t\t\t\tbuf = payload[:0]\n\t\t\t\t\tcontinue\n\t\t\t\t}\n\t\t\t\tatomic.AddInt64(&sentTotal, 1)\n\t\t\t\tif isGet {\n\t\t\t\t\tatomic.AddInt64(&sentGet, 1)\n\t\t\t\t} else {\n\t\t\t\t\tatomic.AddInt64(&sentScan, 1)\n\t\t\t\t}\n\t\t\t\tbuf = payload[:0]\n\t\t\t}\n\t\t}(workerID, conn, rng)"
+                }
+              ]
+            }
+          }
+        ],
+        "parsed_response": {
+          "status": "continue",
+          "Summary": "New agent eBPF selector replaces the prior unrolled 128-iteration loop with a single-slot selection based on reuse->hash % active (or bitmask for power-of-two). Metrics show low p99 at 50\u201360k rps (~5 ms), but catastrophic tail latency and massive response loss starting at 80k rps (p99 ~4.9\u20136.5 seconds, with 100k\u2013360k missing responses). Server perf logs show per-worker processing times and throughput remaining healthy and roughly balanced, suggesting the bottleneck is in UDP packet handling / queueing rather than the synthetic GET/SCAN work itself. Parent program had milder but still severe degradation at high load; the new program is worse overall, especially beyond 80k rps.",
+          "hypothesis": {
+            "text": "The agent policy\u2019s active worker count and reuseport sockarray population in the Go server do not match the actual number of listening workers, causing the eBPF selector to steer traffic only to a subset of sockets. This overloads a few workers\u2019 UDP receive queues while others stay underutilized, leading to large backlogs, packet drops, and extreme tail latency at higher request rates.",
+            "score": 7
+          },
+          "questions": [
+            "In internal/server/ebpf.go\u2019s loadEBPF path for the \"agent\" policy, how is PebbleAgentState.Active initialized relative to the configured number of workers, and is it ever updated afterward?",
+            "In internal/server/server.go\u2019s Server.Run, does updateTargetsMap write every worker\u2019s UDP socket fd into the pebble_udp_targets map, and what key indices does it use for each worker?",
+            "In internal/server/server.go\u2019s openWorker/spawnWorker logic, are all configured workers actually created and bound with SO_REUSEPORT on the same address/port when the agent policy is active, or is any worker skipped or using a different socket?",
+            "Does the server attach the eBPF reuseport program only once (to a single socket) or to each worker socket, and where in internal/server/server.go is this done for the agent policy?",
+            "In cmd/workload_client/main.go, how many send workers are created relative to the -send-workers flag, and is there any per-worker key or flow pattern that could bias reuse->hash so that a small subset of sockets receives most traffic when active < total workers?"
+          ],
+          "question_answers": [
+            {
+              "question": "In internal/server/ebpf.go\u2019s loadEBPF path for the \"agent\" policy, how is PebbleAgentState.Active initialized relative to the configured number of workers, and is it ever updated afterward?",
+              "answer": {
+                "answer": "For the \"agent\" policy, PebbleAgentState.Active is set once to the configured number of workers when loadAgent is called: the state struct is created with Active: uint32(workers) and written into the PebbleAgentState map with key 0. If workers is negative, the function returns an error instead of initializing the state. After this initial Update call, there is no further modification of PebbleAgentState.Active in this code path.",
+                "code_snippets": [
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "func loadAgent(workers int) (*ebpfPolicy, error) {\n\t...\n\tif workers < 0 {\n\t\tobjs.Close()\n\t\treturn nil, ErrInvalidConfig(\"workers must be non-negative\")\n\t}\n\n\tvar key uint32 = 0\n\tstate := ebpfutil.AgentSelectorAgentState{\n\t\tActive: uint32(workers),\n\t}\n\tif objs.PebbleAgentState != nil {\n\t\tif err := objs.PebbleAgentState.Update(&key, &state, ebpf.UpdateAny); err != nil {\n\t\t\tobjs.Close()\n\t\t\treturn nil, fmt.Errorf(\"configure agent state: %w\", err)\n\t\t}\n\t}\n\n\treturn &ebpfPolicy{\n\t\tname:    \"agent\",\n\t\tprogram: objs.AgentUdpSelector,\n\t\tclose:   objs.Close,\n\t}, nil\n}\n"
+                  }
+                ]
+              }
+            },
+            {
+              "question": "In internal/server/server.go\u2019s Server.Run, does updateTargetsMap write every worker\u2019s UDP socket fd into the pebble_udp_targets map, and what key indices does it use for each worker?",
+              "answer": {
+                "answer": "Yes. For each worker that is opened in Server.Run, the file descriptor returned by openWorker is written into the pebble_udp_targets eBPF map via updateTargetsMap. The key used is the worker\u2019s index (cast to uint32), so worker 0 is stored at slot/key 0, worker 1 at slot/key 1, and so on up through the number of workers. Entries are later cleared by iterating the same 0..numSlots-1 index range.",
+                "code_snippets": [
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "func updateTargetsMap(slot uint32, fd int) error {\n\tm, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n\tif err != nil {\n\t\treturn fmt.Errorf(\"load target map: %w\", err)\n\t}\n\tdefer m.Close()\n\n\tvalue := uint32(fd)\n\tif err := m.Update(&slot, &value, ebpf.UpdateAny); err != nil {\n\t\treturn fmt.Errorf(\"update target map: %w\", err)\n\t}\n\treturn nil\n}\n\nfunc clearTargets(numSlots int) error {\n\tm, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n\tif err != nil {\n\t\tif errors.Is(err, fs.ErrNotExist) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\t}\n\tdefer m.Close()\n\n\tfor i := 0; i < numSlots; i++ {\n\t\tkey := uint32(i)\n\t\tif err := m.Delete(&key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {\n\t\t\treturn fmt.Errorf(\"clear slot %d: %w\", i, err)\n\t\t}\n\t}\n\treturn nil\n}\n"
+                  },
+                  {
+                    "path": "internal/server/server.go",
+                    "snippet": "func (s *Server) openWorker(idx int) (*net.UDPConn, int, error) {\n\tattachPolicy := s.policy != nil && s.policy.program != nil && idx == 0\n\tvar attachErr error\n\n\tlc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {\n\t\treturn c.Control(func(fd uintptr) {\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEADDR: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEPORT: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif attachPolicy && attachErr == nil {\n\t\t\t\tif err := s.policy.attach(int(fd)); err != nil {\n\t\t\t\t\tattachErr = err\n\t\t\t\t}\n\t\t\t}\n\t\t})\n\t}}\n\n\tpc, err := lc.ListenPacket(context.Background(), \"udp\", s.cfg.ListenAddr)\n\tif err != nil {\n\t\treturn nil, -1, err\n\t}\n\tif attachErr != nil {\n\t\tpc.Close()\n\t\treturn nil, -1, attachErr\n\t}\n\n\tudpConn := pc.(*net.UDPConn)\n\tvar fd int\n\traw, err := udpConn.SyscallConn()\n\tif err != nil {\n\t\tudpConn.Close()\n\t\treturn nil, -1, err\n\t}\n\tif err := raw.Control(func(value uintptr) {\n\t\tfd = int(value)\n\t}); err != nil {\n\t\tudpConn.Close()\n\t\treturn nil, -1, err\n\t}\n\n\treturn udpConn, fd, nil\n}\n"
+                  }
+                ]
+              }
+            },
+            {
+              "question": "In internal/server/server.go\u2019s openWorker/spawnWorker logic, are all configured workers actually created and bound with SO_REUSEPORT on the same address/port when the agent policy is active, or is any worker skipped or using a different socket?",
+              "answer": {
+                "answer": "All configured workers are created, and each gets its own UDP socket with SO_REUSEPORT set on the same listen address/port. The first worker (idx == 0) is the only one where the eBPF agent policy is attached, but the rest still call openWorker and receive sockets with both SO_REUSEADDR and SO_REUSEPORT configured. No workers are skipped and no worker uses a different address/port; each worker\u2019s goroutine spawned by spawnWorker reads from and writes to its own UDPConn bound to the configured s.cfg.ListenAddr.\n\nSpecifically, openWorker always calls ListenPacket on s.cfg.ListenAddr, sets SO_REUSEADDR and SO_REUSEPORT on the new socket, and only conditionally attaches the policy when idx == 0. spawnWorker is then invoked for each worker index, running a goroutine that serves requests on that per-worker UDPConn.",
+                "code_snippets": [
+                  {
+                    "path": "internal/server/server.go",
+                    "snippet": "func (s *Server) openWorker(idx int) (*net.UDPConn, int, error) {\n\tattachPolicy := s.policy != nil && s.policy.program != nil && idx == 0\n\tvar attachErr error\n\n\tlc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {\n\t\treturn c.Control(func(fd uintptr) {\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEADDR: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEPORT: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif attachPolicy && attachErr == nil {\n\t\t\t\tif err := s.policy.attach(int(fd)); err != nil {\n\t\t\t\t\tattachErr = err\n\t\t\t\t}\n\t\t\t}\n\t\t})\n\t}}\n\n\tpc, err := lc.ListenPacket(context.Background(), \"udp\", s.cfg.ListenAddr)\n\tif err != nil {\n\t\treturn nil, -1, err\n\t}\n\tif attachErr != nil {\n\t\tpc.Close()\n\t\treturn nil, -1, attachErr\n\t}\n\n\tudpConn := pc.(*net.UDPConn)\n\t...\n\treturn udpConn, fd, nil\n}\n"
+                  },
+                  {
+                    "path": "internal/server/server.go",
+                    "snippet": "func (s *Server) spawnWorker(ctx context.Context, idx int, conn *net.UDPConn) {\n\ts.wg.Add(1)\n\tgo func() {\n\t\tdefer s.wg.Done()\n\t\tbuf := make([]byte, 16*1024)\n\n\t\tfor {\n\t\t\tn, addr, err := conn.ReadFromUDP(buf)\n\t\t\tif err != nil {\n\t\t\t\tselect {\n\t\t\t\tcase <-ctx.Done():\n\t\t\t\t\treturn\n\t\t\t\tdefault:\n\t\t\t\t}\n\t\t\t\tif errors.Is(err, net.ErrClosed) {\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\ts.logger.Printf(\"worker=%d read error: %v\", idx, err)\n\t\t\t\tcontinue\n\t\t\t}\n\n\t\t\tresponse := s.handleRequest(idx, buf[:n])\n\t\t\tif response == nil {\n\t\t\t\tcontinue\n\t\t\t}\n\n\t\t\tif _, err := conn.WriteToUDP(response, addr); err != nil {\n\t\t\t\tif errors.Is(err, net.ErrClosed) {\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\ts.logger.Printf(\"worker=%d write error: %v\", idx, err)\n\t\t\t}\n\t\t}\n\t}()\n}\n"
+                  },
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "func loadAgent(workers int) (*ebpfPolicy, error) {\n\t...\n\tstate := ebpfutil.AgentSelectorAgentState{\n\t\tActive: uint32(workers),\n\t}\n\tif objs.PebbleAgentState != nil {\n\t\tif err := objs.PebbleAgentState.Update(&key, &state, ebpf.UpdateAny); err != nil {\n\t\t\tobjs.Close()\n\t\t\treturn nil, fmt.Errorf(\"configure agent state: %w\", err)\n\t\t}\n\t}\n\n\treturn &ebpfPolicy{\n\t\tname:    \"agent\",\n\t\tprogram: objs.AgentUdpSelector,\n\t\tclose:   objs.Close,\n\t}, nil\n}\n"
+                  }
+                ]
+              }
+            },
+            {
+              "question": "Does the server attach the eBPF reuseport program only once (to a single socket) or to each worker socket, and where in internal/server/server.go is this done for the agent policy?",
+              "answer": {
+                "answer": "The eBPF reuseport program is attached only once, to a single socket\u2014the first worker\u2019s socket. In internal/server/server.go, this is controlled in Server.openWorker by the attachPolicy flag, which is true only when idx == 0, and then the policy is attached inside the net.ListenConfig.Control callback:\n\n- attachPolicy is computed as: s.policy != nil && s.policy.program != nil && idx == 0\n- When attachPolicy is true, the eBPF policy\u2019s attach method is invoked on that socket\u2019s file descriptor inside the Control function.\n\nAll subsequent workers (idx > 0) create sockets with SO_REUSEPORT but do not have the eBPF program attached again.",
+                "code_snippets": [
+                  {
+                    "path": "internal/server/server.go",
+                    "snippet": "func (s *Server) openWorker(idx int) (*net.UDPConn, int, error) {\n\tattachPolicy := s.policy != nil && s.policy.program != nil && idx == 0\n\tvar attachErr error\n\n\tlc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {\n\t\treturn c.Control(func(fd uintptr) {\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEADDR: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEPORT: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif attachPolicy && attachErr == nil {\n\t\t\t\tif err := s.policy.attach(int(fd)); err != nil {\n\t\t\t\t\tattachErr = err\n\t\t\t\t}\n\t\t\t}\n\t\t})\n\t}}\n\n\tpc, err := lc.ListenPacket(context.Background(), \"udp\", s.cfg.ListenAddr)\n\tif err != nil {\n\t\treturn nil, -1, err\n\t}\n\tif attachErr != nil {\n\t\tpc.Close()\n\t\treturn nil, -1, attachErr\n\t}\n\n\tudpConn := pc.(*net.UDPConn)\n\t...\n\treturn udpConn, fd, nil\n}\n"
+                  },
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "func loadAgent(workers int) (*ebpfPolicy, error) {\n\t...\n\tstate := ebpfutil.AgentSelectorAgentState{\n\t\tActive: uint32(workers),\n\t}\n\tif objs.PebbleAgentState != nil {\n\t\tif err := objs.PebbleAgentState.Update(&key, &state, ebpf.UpdateAny); err != nil {\n\t\t\tobjs.Close()\n\t\t\treturn nil, fmt.Errorf(\"configure agent state: %w\", err)\n\t\t}\n\t}\n\n\treturn &ebpfPolicy{\n\t\tname:    \"agent\",\n\t\tprogram: objs.AgentUdpSelector,\n\t\tclose:   objs.Close,\n\t}, nil\n}\n"
+                  }
+                ]
+              }
+            },
+            {
+              "question": "In cmd/workload_client/main.go, how many send workers are created relative to the -send-workers flag, and is there any per-worker key or flow pattern that could bias reuse->hash so that a small subset of sockets receives most traffic when active < total workers?",
+              "answer": {
+                "answer": "The number of send workers is taken directly from the -send-workers flag, except that any non\u2011positive value is clamped to 1. After parsing flags, the code does:\n\n- `workers := *sendWorkers`\n- `if workers <= 0 { workers = 1 }`\n- `for i := 0; i < workers; i++ { ... }`\n\nso exactly `send-workers` concurrent send goroutines are created (or 1 if the flag is \u2264 0).\n\nEach worker opens its own UDP connection with:\n- `conn, err := net.DialUDP(\"udp\", nil, udpAddr)` inside the `for i := 0; i < workers; i++` loop.\n\nPer worker, the only differentiation is:\n- A per\u2011worker RNG seeded as `time.Now().UnixNano() + int64(i)`.\n- A `workerID := i` passed to the goroutine (only used for logging).\n\nRequests are generated in a loop using:\n- `rng.Float64()` to decide between GET and SCAN based on the global `-get-frac` flag.\n- `buildPayload(...)` with the same global `-key-prefix`, `-key-space`, and `-scan-limit` parameters.\n- `makeReqID(time.Now().UnixNano(), currSeq, isGet)` where `currSeq` is a single global atomic counter shared by all workers.\n\nNo per\u2011worker key range, prefix, or flow identifier is introduced, and all workers share the same global key space and sequence counter. As a result, there is no explicit per\u2011worker key or flow pattern designed to bias reuse or hashing toward a small subset of sockets; traffic generation is symmetric across workers and governed by shared parameters, with only minor differences from per\u2011worker RNG seeds and timing.",
+                "code_snippets": [
+                  {
+                    "path": "cmd/workload_client/main.go",
+                    "snippet": "var (\n\t\tserverAddr  = flag.String(\"server\", \"127.0.0.1:9000\", \"UDP server address\")\n\t\t...\n\t\tsendWorkers = flag.Int(\"send-workers\", 1, \"number of concurrent send workers\")\n\t)\n\tflag.Parse()\n\n\tworkers := *sendWorkers\n\tif workers <= 0 {\n\t\tworkers = 1\n\t}\n\n\t...\n\n\tudpAddr, err := net.ResolveUDPAddr(\"udp\", *serverAddr)\n\t...\n\tfor i := 0; i < workers; i++ {"
+                  },
+                  {
+                    "path": "cmd/workload_client/main.go",
+                    "snippet": "for i := 0; i < workers; i++ {\n\t\tconn, err := net.DialUDP(\"udp\", nil, udpAddr)\n\t\tif err != nil {\n\t\t\tlogger.Fatalf(\"dial udp worker=%d: %v\", i, err)\n\t\t}\n\t\tdefer conn.Close()\n\n\t\tseed := time.Now().UnixNano() + int64(i)\n\t\trng := rand.New(rand.NewSource(seed))\n\n\t\tworkerID := i\n\n\t\tsendWG.Add(1)\n\t\tgo func(workerID int, conn *net.UDPConn, rng *rand.Rand) {"
+                  },
+                  {
+                    "path": "cmd/workload_client/main.go",
+                    "snippet": "go func(workerID int, conn *net.UDPConn, rng *rand.Rand) {\n\t\t\tdefer sendWG.Done()\n\t\t\tbuf := make([]byte, 0, 256)\n\t\t\tfor {\n\t\t\t\tif err := limiter.Wait(ctx); err != nil {\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\tcurrSeq := atomic.AddUint64(&seq, 1) - 1\n\t\t\t\tisGet := true\n\t\t\t\treqType := \"GET\"\n\t\t\t\tif rng.Float64() > *getFrac {\n\t\t\t\t\treqType = \"SCAN\"\n\t\t\t\t\tisGet = false\n\t\t\t\t}\n\t\t\t\t// Capture timestamp, build payload, and send immediately\n\t\t\t\treqID := makeReqID(time.Now().UnixNano(), currSeq, isGet)\n\t\t\t\tpayload := buildPayload(rng, buf, reqType, reqID, *keyPrefix, *keySpace, *scanLimit)\n\t\t\t\tif _, err := conn.Write(payload); err != nil {\n\t\t\t\t\tlogger.Printf(\"write error (worker=%d): %v\", workerID, err)\n\t\t\t\t\tbuf = payload[:0]\n\t\t\t\t\tcontinue\n\t\t\t\t}\n\t\t\t\tatomic.AddInt64(&sentTotal, 1)\n\t\t\t\tif isGet {\n\t\t\t\t\tatomic.AddInt64(&sentGet, 1)\n\t\t\t\t} else {\n\t\t\t\t\tatomic.AddInt64(&sentScan, 1)\n\t\t\t\t}\n\t\t\t\tbuf = payload[:0]\n\t\t\t}\n\t\t}(workerID, conn, rng)"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "iteration": 1,
+        "assistant_role": "assistant",
+        "assistant_content": {
+          "status": "continue",
+          "Summary": "RAG shows the agent state\u2019s Active count is correctly set to the full worker count once at load time, all workers are created with SO_REUSEPORT on the same address, each worker fd is inserted into the reuseport sockarray at its index, and the eBPF program is attached once to worker 0\u2019s socket (standard reuseport behavior). The client uses symmetric traffic generation with multiple UDP connections but no flow bias. Thus, the earlier hypothesis of mismatched Active or incomplete target population is not supported. Despite seemingly balanced per-worker server stats, p99 latency and missing responses explode from 80k rps upward, indicating a high-load pathology not explained by misconfigured worker counts or maps.",
+          "hypothesis": {
+            "text": "At high request rates, the new agent eBPF selector\u2019s single bpf_sk_select_reuseport call combined with always returning SK_PASS causes the kernel\u2019s reuseport logic to sometimes ignore or override the BPF steering, leading to unstable flow-to-socket assignment and pathological interaction with the UDP receive queues. This instability causes bursts of queue buildup and drops that manifest as extreme tail latency and many missing responses, even though per-worker application-level processing remains fast.",
+            "score": 5
+          },
+          "questions": [
+            "In internal/server/ebpf.go, when loading the agent policy, does the code clear the pebble_udp_targets map before populating it for the current run, and is clearTargets called with a numSlots equal to or greater than the configured worker count?",
+            "In internal/server/ebpf.go\u2019s ebpfPolicy.attach implementation for the agent policy, what socket option or attach mechanism is used (e.g., SO_ATTACH_REUSEPORT_EBPF), and is any specific flags or mode configured that could affect how the kernel combines BPF selection with its default hash-based routing?",
+            "In internal/server/server.go\u2019s Server.Run, in what order are (a) the eBPF program loaded, (b) the workers\u2019 sockets opened, and (c) the reuseport target map entries updated, and is there any window where the program could run before all targets are installed?",
+            "In internal/server/server.go\u2019s stats reporting (startStatsLogger and workerStats handling), do the logged per-worker GET/SCAN counts and latencies include all requests that reach the sockets, or is there any filtering or early drop path in handleRequest that might hide packets that were received but not fully processed?",
+            "In cmd/workload_client/main.go, what timeout or deadline is set on the UDP receive side (ReadFromUDP) and how is it configured relative to the workload duration, and could this cause late responses to be ignored by the client even if the server eventually sends them?"
+          ]
+        },
+        "assistant_content_format": "json",
+        "assistant_content_raw": "{\"status\":\"continue\",\"Summary\":\"RAG shows the agent state\u2019s Active count is correctly set to the full worker count once at load time, all workers are created with SO_REUSEPORT on the same address, each worker fd is inserted into the reuseport sockarray at its index, and the eBPF program is attached once to worker 0\u2019s socket (standard reuseport behavior). The client uses symmetric traffic generation with multiple UDP connections but no flow bias. Thus, the earlier hypothesis of mismatched Active or incomplete target population is not supported. Despite seemingly balanced per-worker server stats, p99 latency and missing responses explode from 80k rps upward, indicating a high-load pathology not explained by misconfigured worker counts or maps.\",\"hypothesis\":{\"text\":\"At high request rates, the new agent eBPF selector\u2019s single bpf_sk_select_reuseport call combined with always returning SK_PASS causes the kernel\u2019s reuseport logic to sometimes ignore or override the BPF steering, leading to unstable flow-to-socket assignment and pathological interaction with the UDP receive queues. This instability causes bursts of queue buildup and drops that manifest as extreme tail latency and many missing responses, even though per-worker application-level processing remains fast.\",\"score\":5},\"questions\":[\"In internal/server/ebpf.go, when loading the agent policy, does the code clear the pebble_udp_targets map before populating it for the current run, and is clearTargets called with a numSlots equal to or greater than the configured worker count?\",\"In internal/server/ebpf.go\u2019s ebpfPolicy.attach implementation for the agent policy, what socket option or attach mechanism is used (e.g., SO_ATTACH_REUSEPORT_EBPF), and is any specific flags or mode configured that could affect how the kernel combines BPF selection with its default hash-based routing?\",\"In internal/server/server.go\u2019s Server.Run, in what order are (a) the eBPF program loaded, (b) the workers\u2019 sockets opened, and (c) the reuseport target map entries updated, and is there any window where the program could run before all targets are installed?\",\"In internal/server/server.go\u2019s stats reporting (startStatsLogger and workerStats handling), do the logged per-worker GET/SCAN counts and latencies include all requests that reach the sockets, or is there any filtering or early drop path in handleRequest that might hide packets that were received but not fully processed?\",\"In cmd/workload_client/main.go, what timeout or deadline is set on the UDP receive side (ReadFromUDP) and how is it configured relative to the workload duration, and could this cause late responses to be ignored by the client even if the server eventually sends them?\"]}",
+        "full_response": {
+          "id": "chatcmpl-CdNIM4kpd7kelKAJrRnoznhH2aYaI",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "logprobs": null,
+              "message": {
+                "content": "{\"status\":\"continue\",\"Summary\":\"RAG shows the agent state\u2019s Active count is correctly set to the full worker count once at load time, all workers are created with SO_REUSEPORT on the same address, each worker fd is inserted into the reuseport sockarray at its index, and the eBPF program is attached once to worker 0\u2019s socket (standard reuseport behavior). The client uses symmetric traffic generation with multiple UDP connections but no flow bias. Thus, the earlier hypothesis of mismatched Active or incomplete target population is not supported. Despite seemingly balanced per-worker server stats, p99 latency and missing responses explode from 80k rps upward, indicating a high-load pathology not explained by misconfigured worker counts or maps.\",\"hypothesis\":{\"text\":\"At high request rates, the new agent eBPF selector\u2019s single bpf_sk_select_reuseport call combined with always returning SK_PASS causes the kernel\u2019s reuseport logic to sometimes ignore or override the BPF steering, leading to unstable flow-to-socket assignment and pathological interaction with the UDP receive queues. This instability causes bursts of queue buildup and drops that manifest as extreme tail latency and many missing responses, even though per-worker application-level processing remains fast.\",\"score\":5},\"questions\":[\"In internal/server/ebpf.go, when loading the agent policy, does the code clear the pebble_udp_targets map before populating it for the current run, and is clearTargets called with a numSlots equal to or greater than the configured worker count?\",\"In internal/server/ebpf.go\u2019s ebpfPolicy.attach implementation for the agent policy, what socket option or attach mechanism is used (e.g., SO_ATTACH_REUSEPORT_EBPF), and is any specific flags or mode configured that could affect how the kernel combines BPF selection with its default hash-based routing?\",\"In internal/server/server.go\u2019s Server.Run, in what order are (a) the eBPF program loaded, (b) the workers\u2019 sockets opened, and (c) the reuseport target map entries updated, and is there any window where the program could run before all targets are installed?\",\"In internal/server/server.go\u2019s stats reporting (startStatsLogger and workerStats handling), do the logged per-worker GET/SCAN counts and latencies include all requests that reach the sockets, or is there any filtering or early drop path in handleRequest that might hide packets that were received but not fully processed?\",\"In cmd/workload_client/main.go, what timeout or deadline is set on the UDP receive side (ReadFromUDP) and how is it configured relative to the workload duration, and could this cause late responses to be ignored by the client even if the server eventually sends them?\"]}",
+                "refusal": null,
+                "role": "assistant",
+                "annotations": [],
+                "audio": null,
+                "function_call": null,
+                "tool_calls": null
+              }
+            }
+          ],
+          "created": 1763500374,
+          "model": "gpt-5.1-2025-11-13",
+          "object": "chat.completion",
+          "service_tier": "default",
+          "system_fingerprint": null,
+          "usage": {
+            "completion_tokens": 559,
+            "prompt_tokens": 25310,
+            "total_tokens": 25869,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 20096
+            }
+          }
+        },
+        "rag_results": [
+          {
+            "question": "In internal/server/ebpf.go, when loading the agent policy, does the code clear the pebble_udp_targets map before populating it for the current run, and is clearTargets called with a numSlots equal to or greater than the configured worker count?",
+            "answer": {
+              "answer": "The agent-loading logic in internal/server/ebpf.go does not clear the pebble_udp_targets map before configuring and using the agent policy, and there is no call to clearTargets in loadAgent. The loadAgent function only ensures rlimits and the pin directory, loads the AgentSelector eBPF objects, validates the workers parameter, and writes the worker count into the PebbleAgentState map. It does not invoke clearTargets at all. Consequently, clearTargets is not called with any numSlots value, and therefore is not guaranteed (nor attempted) to be called with a value equal to or greater than the configured worker count when loading the agent policy for a run.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func loadAgent(workers int) (*ebpfPolicy, error) {\n\tif err := ensureRlimit(); err != nil {\n\t\treturn nil, err\n\t}\n\tpinDir := pinDirectory()\n\tif err := ensurePinDirectory(pinDir); err != nil {\n\t\treturn nil, fmt.Errorf(\"ensure pin directory: %w\", err)\n\t}\n\tvar objs ebpfutil.AgentSelectorObjects\n\topts := &ebpf.CollectionOptions{\n\t\tMaps: ebpf.MapOptions{PinPath: pinDir},\n\t}\n\tif err := ebpfutil.LoadAgentSelectorObjects(&objs, opts); err != nil {\n\t\treturn nil, fmt.Errorf(\"load agent objects: %w\", err)\n\t}\n\n\tif workers < 0 {\n\t\tobjs.Close()\n\t\treturn nil, ErrInvalidConfig(\"workers must be non-negative\")\n\t}\n\n\tvar key uint32 = 0\n\tstate := ebpfutil.AgentSelectorAgentState{\n\t\tActive: uint32(workers),\n\t}\n\tif objs.PebbleAgentState != nil {\n\t\tif err := objs.PebbleAgentState.Update(&key, &state, ebpf.UpdateAny); err != nil {\n\t\t\tobjs.Close()\n\t\t\treturn nil, fmt.Errorf(\"configure agent state: %w\", err)\n\t\t}\n\t}\n\n\treturn &ebpfPolicy{\n\t\tname:    \"agent\",\n\t\tprogram: objs.AgentUdpSelector,\n\t\tclose:   objs.Close,\n\t}, nil\n}\n"
+                },
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func clearTargets(numSlots int) error {\n\tm, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n\tif err != nil {\n\t\tif errors.Is(err, fs.ErrNotExist) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\t}\n\tdefer m.Close()\n\n\tfor i := 0; i < numSlots; i++ {\n\t\tkey := uint32(i)\n\t\tif err := m.Delete(&key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {\n\t\t\treturn fmt.Errorf(\"clear slot %d: %w\", i, err)\n\t\t}\n\t}\n\treturn nil\n}\n"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In internal/server/ebpf.go\u2019s ebpfPolicy.attach implementation for the agent policy, what socket option or attach mechanism is used (e.g., SO_ATTACH_REUSEPORT_EBPF), and is any specific flags or mode configured that could affect how the kernel combines BPF selection with its default hash-based routing?",
+            "answer": {
+              "answer": "The ebpfPolicy.attach implementation uses the SO_ATTACH_REUSEPORT_EBPF socket option via unix.SetsockoptInt on SOL_SOCKET, passing the file descriptor of the loaded eBPF program. No additional flags, modes, or alternative attach mechanisms are configured in this implementation, so nothing extra is set that would modify how the kernel combines BPF-based selection with its default hash-based reuseport routing beyond the standard SO_ATTACH_REUSEPORT_EBPF behavior.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func (p *ebpfPolicy) attach(fd int) error {\n\tif p == nil || p.program == nil {\n\t\treturn nil\n\t}\n\tif err := unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ATTACH_REUSEPORT_EBPF, p.program.FD()); err != nil {\n\t\treturn fmt.Errorf(\"attach reuseport ebpf: %w\", err)\n\t}\n\treturn nil\n}\n"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In internal/server/server.go\u2019s Server.Run, in what order are (a) the eBPF program loaded, (b) the workers\u2019 sockets opened, and (c) the reuseport target map entries updated, and is there any window where the program could run before all targets are installed?",
+            "answer": {
+              "answer": "The eBPF program is loaded when the server is constructed with New, before Run is called. Inside Server.Run, for each worker index i, the sequence is:\n\n1) Open the worker\u2019s socket: openWorker(i) is called first to get the connection and its file descriptor.\n2) Update the reuseport target map for that worker: if an eBPF policy/program is present, updateTargetsMap(uint32(i), fd) is called immediately after openWorker succeeds, before the connection is stored.\n3) Start the worker goroutine: the connection is appended to s.conns and spawnWorker(ctx, i, conn) is called after the map update.\n\nThis loop runs once per worker. The eBPF program is thus already loaded (by New) before any sockets are opened in Run, and each worker\u2019s socket is inserted into the reuseport map as soon as it is opened, before that worker is spawned.\n\nThere is a window where the eBPF program can be active while not all workers\u2019 targets are installed: after the first worker\u2019s socket is opened and its map entry is added, that worker is spawned and can start handling traffic while the later workers are still in the process of being opened and added to the map. However, the program does not see a worker before its own map entry is installed, because the map update for a given worker is done immediately after openWorker for that worker and before spawnWorker for that worker.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/server.go",
+                  "snippet": "func New(cfg Config, logger *log.Logger) (*Server, error) {\n\t...\n\tpolicy, err := loadEBPF(cfg.Policy, cfg.Workers)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\n\tif policy != nil && policy.program != nil {\n\t\tif err := clearTargets(cfg.Workers); err != nil {\n\t\t\tpolicy.Close()\n\t\t\treturn nil, fmt.Errorf(\"clear reuseport map: %w\", err)\n\t\t}\n\t}\n\n\treturn &Server{\n\t\tcfg:    cfg,\n\t\tpolicy: policy,\n\t\tlogger: logger,\n\t\tstats:  make([]workerStats, cfg.Workers),\n\t}, nil\n}\n"
+                },
+                {
+                  "path": "internal/server/server.go",
+                  "snippet": "func (s *Server) Run(ctx context.Context) error {\n\t...\n\tfor i := 0; i < s.cfg.Workers; i++ {\n\t\tconn, fd, err := s.openWorker(i)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"open worker %d: %w\", i, err)\n\t\t}\n\n\t\tif s.policy != nil && s.policy.program != nil {\n\t\t\tif err := updateTargetsMap(uint32(i), fd); err != nil {\n\t\t\t\tconn.Close()\n\t\t\t\treturn fmt.Errorf(\"update reuseport map: %w\", err)\n\t\t\t}\n\t\t}\n\n\t\ts.conns = append(s.conns, conn)\n\t\ts.spawnWorker(ctx, i, conn)\n\t}\n\n\t<-ctx.Done()\n\tfor _, conn := range s.conns {\n\t\tconn.Close()\n\t}\n\ts.wg.Wait()\n\treturn nil\n}\n"
+                },
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func loadRoundRobin(workers int) (*ebpfPolicy, error) {\n\tif err := ensureRlimit(); err != nil {\n\t\treturn nil, err\n\t}\n\tpinDir := pinDirectory()\n\tif err := ensurePinDirectory(pinDir); err != nil {\n\t\treturn nil, fmt.Errorf(\"ensure pin directory: %w\", err)\n\t}\n\tvar objs ebpfutil.RrSelectorObjects\n\topts := &ebpf.CollectionOptions{\n\t\tMaps: ebpf.MapOptions{PinPath: pinDir},\n\t}\n\tif err := ebpfutil.LoadRrSelectorObjects(&objs, opts); err != nil {\n\t\treturn nil, fmt.Errorf(\"load round robin objects: %w\", err)\n\t}\n\t...\n\treturn &ebpfPolicy{\n\t\tname:    \"round_robin\",\n\t\tprogram: objs.RrUdpSelector,\n\t\tclose:   objs.Close,\n\t}, nil\n}\n"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In internal/server/server.go\u2019s stats reporting (startStatsLogger and workerStats handling), do the logged per-worker GET/SCAN counts and latencies include all requests that reach the sockets, or is there any filtering or early drop path in handleRequest that might hide packets that were received but not fully processed?",
+            "answer": {
+              "answer": "The statistics reported by the workerStats logic only reflect requests that are actually processed to the point where they are counted in the workerStats fields. The logging code iterates over each worker\u2019s stats snapshot and only logs a worker if its getCount or scanCount is greater than zero:\n\n- Per\u2011worker logging is gated by:\n  - `if snap.getCount > 0 || snap.scanCount > 0 { ... }`\n- Aggregated totals are computed by summing the snapshot counters:\n  - `total.getCount += snap.getCount`, `total.scanCount += snap.scanCount`, and the corresponding latency and error fields.\n- The overall interval log is skipped entirely if both totals are zero:\n  - `if total.getCount == 0 && total.scanCount == 0 { continue }`.\n\nThere is no evidence in this code that packets or connections are counted at the socket/receive level before they are turned into GET/SCAN requests and recorded into workerStats. The stats logger only works with the workerStats counters that have already been incremented. Any request that is dropped, rejected, or bailed out in handleRequest before incrementing getCount/scanCount (or associated latency fields) would not show up in these per\u2011worker or total GET/SCAN counts or latencies. Thus, the reported numbers are limited to requests that make it far enough through processing to update workerStats; they do not automatically include all packets that merely reach the sockets.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/server.go",
+                  "snippet": "if s.logger == nil || len(s.stats) == 0 {\n\t\treturn\n\t}\n\ts.statsWG.Add(1)\n\tvar total workerStatsSnapshot\n\tfor i := range s.stats {\n\t\tsnap := s.stats[i].snapshotAndReset()\n\t\tif snap.getCount > 0 || snap.scanCount > 0 {\n\t\t\tvar workerAvgGet time.Duration\n\t\t\tif snap.getCount > 0 {\n\t\t\t\tworkerAvgGet = time.Duration(int64(snap.getLatency) / int64(snap.getCount))\n\t\t\t}\n\t\t\tvar workerAvgScan time.Duration\n\t\t\tif snap.scanCount > 0 {\n\t\t\t\tworkerAvgScan = time.Duration(int64(snap.scanLatency) / int64(snap.scanCount))\n\t\t\t}\n\t\t\ts.logger.Printf(\n\t\t\t\t\"[perf] worker=%d gets=%d get_errors=%d avg_get=%s scans=%d scan_errors=%d avg_scan=%s\",\n\t\t\t\ti,\n\t\t\t\tsnap.getCount,\n\t\t\t\tsnap.getErrors,\n\t\t\t\tworkerAvgGet,\n\t\t\t\tsnap.scanCount,\n\t\t\t\tsnap.scanErrors,\n\t\t\t\tworkerAvgScan,\n\t\t\t)\n\t\t}\n\t\ttotal.getCount += snap.getCount\n\t\ttotal.getErrors += snap.getErrors\n\t\ttotal.getLatency += snap.getLatency\n\t\ttotal.scanCount += snap.scanCount\n\t\ttotal.scanErrors += snap.scanErrors\n\t\ttotal.scanLatency += snap.scanLatency\n\t}\n\tif total.getCount == 0 && total.scanCount == 0 {\n\t\tcontinue\n\t}\n\tvar avgGet time.Duration\n\tif total.getCount > 0 {\n\t\tavgGet = time.Duration(int64(total.getLatency) / int64(total.getCount))\n\t}\n\tvar avgScan time.Duration\n\tif total.scanCount > 0 {\n\t\tavgScan = time.Duration(int64(total.scanLatency) / int64(total.scanCount))\n\t}"
+                },
+                {
+                  "path": "internal/server/server.go",
+                  "snippet": "s.logger.Printf(\n\t\"[perf] interval=1s gets=%d get_errors=%d avg_get=%s scans=%d scan_errors=%d avg_scan=%s\",\n\ttotal.getCount,\n\ttotal.getErrors,\n\tavgGet,\n\ttotal.scanCount,\n\ttotal.scanErrors,\n\tavgScan,\n)\n"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In cmd/workload_client/main.go, what timeout or deadline is set on the UDP receive side (ReadFromUDP) and how is it configured relative to the workload duration, and could this cause late responses to be ignored by the client even if the server eventually sends them?",
+            "answer": {
+              "answer": "The UDP receive loop sets a fixed 5\u2011second read deadline on the UDP connection and then keeps renewing it on each timeout, independent of the overall workload duration. Specifically, after creating the UDP connection, the receive goroutine calls:\n\n- `conn.SetReadDeadline(time.Now().Add(5 * time.Second))` once before entering the loop.\n- On each timeout error, it calls `conn.SetReadDeadline(time.Now().Add(5 * time.Second))` again to extend the deadline by another 5 seconds, unless the `quit` channel has been closed.\n\nThis deadline is **not** tied to the configured workload `duration` flag; it is always 5 seconds from \"now\" whenever it is set or reset. As long as the client is still running (i.e., `quit` has not been closed and the connection is not closed), late server responses that arrive within any active 5\u2011second window will still be read, because the deadline is continuously extended after timeouts.\n\nHowever, once the client signals shutdown via `quit` (based on the workload duration logic elsewhere) and the receive goroutine exits\u2014or if the UDP connection is closed\u2014any responses that the server sends after that point will be ignored because there is no longer any receive loop reading from the socket. So late responses that arrive after the client has stopped listening are effectively ignored, but this is due to shutdown rather than the 5\u2011second deadline itself.",
+              "code_snippets": [
+                {
+                  "path": "cmd/workload_client/main.go",
+                  "snippet": "go func(workerID int, conn *net.UDPConn) {\n\t\t\tdefer recvWG.Done()\n\t\t\tbuf := make([]byte, 64*1024)\n\t\t\t// Set read deadline once to avoid blocking forever\n\t\t\tconn.SetReadDeadline(time.Now().Add(5 * time.Second))\n\t\t\tfor {\n\t\t\t\tn, err := conn.Read(buf)\n\t\t\t\t// Capture receive timestamp immediately\n\t\t\t\trecvNano := time.Now().UnixNano()\n\t\t\t\tif err != nil {\n\t\t\t\t\tif ne, ok := err.(net.Error); ok && ne.Timeout() {\n\t\t\t\t\t\t// Reset deadline on timeout\n\t\t\t\t\t\tconn.SetReadDeadline(time.Now().Add(5 * time.Second))\n\t\t\t\t\t\tselect {\n\t\t\t\t\t\tcase <-quit:\n\t\t\t\t\t\t\treturn\n\t\t\t\t\t\tdefault:\n\t\t\t\t\t\t\tcontinue\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif errors.Is(err, net.ErrClosed) || errors.Is(err, os.ErrClosed) {\n\t\t\t\t\t\treturn\n\t\t\t\t\t}\n\t\t\t\t\tlogger.Printf(\"read error (worker=%d): %v\", workerID, err)\n\t\t\t\t\tcontinue\n\t\t\t\t}\n\n\t\t\t\tfields := bytes.Fields(buf[:n])\n\t\t\t\tif len(fields) < 2 {\n\t\t\t\t\tcontinue\n\t\t\t\t}\n\t\t\t\tsendNano, isGet, ok := parseReqID(fields[1])\n\t\t\t\tif !ok {\n\t\t\t\t\tcontinue\n\t\t\t\t}\n\t\t\t\tlatencyMs := float64(recvNano-sendNano) / 1e6\n\t\t\t\tselect {\n\t\t\t\tcase latencyCh <- latencyRecord{latency: latencyMs, isGet: isGet}:\n\t\t\t\tcase <-quit:\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n\t\t}(workerID, conn)"
+                },
+                {
+                  "path": "cmd/workload_client/main.go",
+                  "snippet": "var (\n\t\tserverAddr  = flag.String(\"server\", \"127.0.0.1:9000\", \"UDP server address\")\n\t\tduration    = flag.Duration(\"duration\", 30*time.Second, \"duration of the workload\")\n\t\ttargetRate  = flag.Float64(\"rate\", 1000, \"target send rate (requests per second)\")\n\t\tgetFrac     = flag.Float64(\"get-frac\", 0.8, \"fraction of GET requests; remainder are SCAN\")\n\t\tscanLimit   = flag.Int(\"scan-limit\", 500, \"number of keys per SCAN request\")\n\t\tkeyPrefix   = flag.String(\"key-prefix\", \"key\", \"prefix used when generating keys\")\n\t\tkeySpace    = flag.Int(\"key-space\", 100000, \"upper bound (exclusive) for generated key numbers\")\n\t\tlogPath     = flag.String(\"log\", \"logs/client.log\", \"path to log file\")\n\t\tsendWorkers = flag.Int(\"send-workers\", 1, \"number of concurrent send workers\")\n\t)\n\tflag.Parse()"
+                }
+              ]
+            }
+          }
+        ],
+        "parsed_response": {
+          "status": "continue",
+          "Summary": "RAG shows the agent state\u2019s Active count is correctly set to the full worker count once at load time, all workers are created with SO_REUSEPORT on the same address, each worker fd is inserted into the reuseport sockarray at its index, and the eBPF program is attached once to worker 0\u2019s socket (standard reuseport behavior). The client uses symmetric traffic generation with multiple UDP connections but no flow bias. Thus, the earlier hypothesis of mismatched Active or incomplete target population is not supported. Despite seemingly balanced per-worker server stats, p99 latency and missing responses explode from 80k rps upward, indicating a high-load pathology not explained by misconfigured worker counts or maps.",
+          "hypothesis": {
+            "text": "At high request rates, the new agent eBPF selector\u2019s single bpf_sk_select_reuseport call combined with always returning SK_PASS causes the kernel\u2019s reuseport logic to sometimes ignore or override the BPF steering, leading to unstable flow-to-socket assignment and pathological interaction with the UDP receive queues. This instability causes bursts of queue buildup and drops that manifest as extreme tail latency and many missing responses, even though per-worker application-level processing remains fast.",
+            "score": 5
+          },
+          "questions": [
+            "In internal/server/ebpf.go, when loading the agent policy, does the code clear the pebble_udp_targets map before populating it for the current run, and is clearTargets called with a numSlots equal to or greater than the configured worker count?",
+            "In internal/server/ebpf.go\u2019s ebpfPolicy.attach implementation for the agent policy, what socket option or attach mechanism is used (e.g., SO_ATTACH_REUSEPORT_EBPF), and is any specific flags or mode configured that could affect how the kernel combines BPF selection with its default hash-based routing?",
+            "In internal/server/server.go\u2019s Server.Run, in what order are (a) the eBPF program loaded, (b) the workers\u2019 sockets opened, and (c) the reuseport target map entries updated, and is there any window where the program could run before all targets are installed?",
+            "In internal/server/server.go\u2019s stats reporting (startStatsLogger and workerStats handling), do the logged per-worker GET/SCAN counts and latencies include all requests that reach the sockets, or is there any filtering or early drop path in handleRequest that might hide packets that were received but not fully processed?",
+            "In cmd/workload_client/main.go, what timeout or deadline is set on the UDP receive side (ReadFromUDP) and how is it configured relative to the workload duration, and could this cause late responses to be ignored by the client even if the server eventually sends them?"
+          ],
+          "question_answers": [
+            {
+              "question": "In internal/server/ebpf.go, when loading the agent policy, does the code clear the pebble_udp_targets map before populating it for the current run, and is clearTargets called with a numSlots equal to or greater than the configured worker count?",
+              "answer": {
+                "answer": "The agent-loading logic in internal/server/ebpf.go does not clear the pebble_udp_targets map before configuring and using the agent policy, and there is no call to clearTargets in loadAgent. The loadAgent function only ensures rlimits and the pin directory, loads the AgentSelector eBPF objects, validates the workers parameter, and writes the worker count into the PebbleAgentState map. It does not invoke clearTargets at all. Consequently, clearTargets is not called with any numSlots value, and therefore is not guaranteed (nor attempted) to be called with a value equal to or greater than the configured worker count when loading the agent policy for a run.",
+                "code_snippets": [
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "func loadAgent(workers int) (*ebpfPolicy, error) {\n\tif err := ensureRlimit(); err != nil {\n\t\treturn nil, err\n\t}\n\tpinDir := pinDirectory()\n\tif err := ensurePinDirectory(pinDir); err != nil {\n\t\treturn nil, fmt.Errorf(\"ensure pin directory: %w\", err)\n\t}\n\tvar objs ebpfutil.AgentSelectorObjects\n\topts := &ebpf.CollectionOptions{\n\t\tMaps: ebpf.MapOptions{PinPath: pinDir},\n\t}\n\tif err := ebpfutil.LoadAgentSelectorObjects(&objs, opts); err != nil {\n\t\treturn nil, fmt.Errorf(\"load agent objects: %w\", err)\n\t}\n\n\tif workers < 0 {\n\t\tobjs.Close()\n\t\treturn nil, ErrInvalidConfig(\"workers must be non-negative\")\n\t}\n\n\tvar key uint32 = 0\n\tstate := ebpfutil.AgentSelectorAgentState{\n\t\tActive: uint32(workers),\n\t}\n\tif objs.PebbleAgentState != nil {\n\t\tif err := objs.PebbleAgentState.Update(&key, &state, ebpf.UpdateAny); err != nil {\n\t\t\tobjs.Close()\n\t\t\treturn nil, fmt.Errorf(\"configure agent state: %w\", err)\n\t\t}\n\t}\n\n\treturn &ebpfPolicy{\n\t\tname:    \"agent\",\n\t\tprogram: objs.AgentUdpSelector,\n\t\tclose:   objs.Close,\n\t}, nil\n}\n"
+                  },
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "func clearTargets(numSlots int) error {\n\tm, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n\tif err != nil {\n\t\tif errors.Is(err, fs.ErrNotExist) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\t}\n\tdefer m.Close()\n\n\tfor i := 0; i < numSlots; i++ {\n\t\tkey := uint32(i)\n\t\tif err := m.Delete(&key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {\n\t\t\treturn fmt.Errorf(\"clear slot %d: %w\", i, err)\n\t\t}\n\t}\n\treturn nil\n}\n"
+                  }
+                ]
+              }
+            },
+            {
+              "question": "In internal/server/ebpf.go\u2019s ebpfPolicy.attach implementation for the agent policy, what socket option or attach mechanism is used (e.g., SO_ATTACH_REUSEPORT_EBPF), and is any specific flags or mode configured that could affect how the kernel combines BPF selection with its default hash-based routing?",
+              "answer": {
+                "answer": "The ebpfPolicy.attach implementation uses the SO_ATTACH_REUSEPORT_EBPF socket option via unix.SetsockoptInt on SOL_SOCKET, passing the file descriptor of the loaded eBPF program. No additional flags, modes, or alternative attach mechanisms are configured in this implementation, so nothing extra is set that would modify how the kernel combines BPF-based selection with its default hash-based reuseport routing beyond the standard SO_ATTACH_REUSEPORT_EBPF behavior.",
+                "code_snippets": [
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "func (p *ebpfPolicy) attach(fd int) error {\n\tif p == nil || p.program == nil {\n\t\treturn nil\n\t}\n\tif err := unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ATTACH_REUSEPORT_EBPF, p.program.FD()); err != nil {\n\t\treturn fmt.Errorf(\"attach reuseport ebpf: %w\", err)\n\t}\n\treturn nil\n}\n"
+                  }
+                ]
+              }
+            },
+            {
+              "question": "In internal/server/server.go\u2019s Server.Run, in what order are (a) the eBPF program loaded, (b) the workers\u2019 sockets opened, and (c) the reuseport target map entries updated, and is there any window where the program could run before all targets are installed?",
+              "answer": {
+                "answer": "The eBPF program is loaded when the server is constructed with New, before Run is called. Inside Server.Run, for each worker index i, the sequence is:\n\n1) Open the worker\u2019s socket: openWorker(i) is called first to get the connection and its file descriptor.\n2) Update the reuseport target map for that worker: if an eBPF policy/program is present, updateTargetsMap(uint32(i), fd) is called immediately after openWorker succeeds, before the connection is stored.\n3) Start the worker goroutine: the connection is appended to s.conns and spawnWorker(ctx, i, conn) is called after the map update.\n\nThis loop runs once per worker. The eBPF program is thus already loaded (by New) before any sockets are opened in Run, and each worker\u2019s socket is inserted into the reuseport map as soon as it is opened, before that worker is spawned.\n\nThere is a window where the eBPF program can be active while not all workers\u2019 targets are installed: after the first worker\u2019s socket is opened and its map entry is added, that worker is spawned and can start handling traffic while the later workers are still in the process of being opened and added to the map. However, the program does not see a worker before its own map entry is installed, because the map update for a given worker is done immediately after openWorker for that worker and before spawnWorker for that worker.",
+                "code_snippets": [
+                  {
+                    "path": "internal/server/server.go",
+                    "snippet": "func New(cfg Config, logger *log.Logger) (*Server, error) {\n\t...\n\tpolicy, err := loadEBPF(cfg.Policy, cfg.Workers)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\n\tif policy != nil && policy.program != nil {\n\t\tif err := clearTargets(cfg.Workers); err != nil {\n\t\t\tpolicy.Close()\n\t\t\treturn nil, fmt.Errorf(\"clear reuseport map: %w\", err)\n\t\t}\n\t}\n\n\treturn &Server{\n\t\tcfg:    cfg,\n\t\tpolicy: policy,\n\t\tlogger: logger,\n\t\tstats:  make([]workerStats, cfg.Workers),\n\t}, nil\n}\n"
+                  },
+                  {
+                    "path": "internal/server/server.go",
+                    "snippet": "func (s *Server) Run(ctx context.Context) error {\n\t...\n\tfor i := 0; i < s.cfg.Workers; i++ {\n\t\tconn, fd, err := s.openWorker(i)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"open worker %d: %w\", i, err)\n\t\t}\n\n\t\tif s.policy != nil && s.policy.program != nil {\n\t\t\tif err := updateTargetsMap(uint32(i), fd); err != nil {\n\t\t\t\tconn.Close()\n\t\t\t\treturn fmt.Errorf(\"update reuseport map: %w\", err)\n\t\t\t}\n\t\t}\n\n\t\ts.conns = append(s.conns, conn)\n\t\ts.spawnWorker(ctx, i, conn)\n\t}\n\n\t<-ctx.Done()\n\tfor _, conn := range s.conns {\n\t\tconn.Close()\n\t}\n\ts.wg.Wait()\n\treturn nil\n}\n"
+                  },
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "func loadRoundRobin(workers int) (*ebpfPolicy, error) {\n\tif err := ensureRlimit(); err != nil {\n\t\treturn nil, err\n\t}\n\tpinDir := pinDirectory()\n\tif err := ensurePinDirectory(pinDir); err != nil {\n\t\treturn nil, fmt.Errorf(\"ensure pin directory: %w\", err)\n\t}\n\tvar objs ebpfutil.RrSelectorObjects\n\topts := &ebpf.CollectionOptions{\n\t\tMaps: ebpf.MapOptions{PinPath: pinDir},\n\t}\n\tif err := ebpfutil.LoadRrSelectorObjects(&objs, opts); err != nil {\n\t\treturn nil, fmt.Errorf(\"load round robin objects: %w\", err)\n\t}\n\t...\n\treturn &ebpfPolicy{\n\t\tname:    \"round_robin\",\n\t\tprogram: objs.RrUdpSelector,\n\t\tclose:   objs.Close,\n\t}, nil\n}\n"
+                  }
+                ]
+              }
+            },
+            {
+              "question": "In internal/server/server.go\u2019s stats reporting (startStatsLogger and workerStats handling), do the logged per-worker GET/SCAN counts and latencies include all requests that reach the sockets, or is there any filtering or early drop path in handleRequest that might hide packets that were received but not fully processed?",
+              "answer": {
+                "answer": "The statistics reported by the workerStats logic only reflect requests that are actually processed to the point where they are counted in the workerStats fields. The logging code iterates over each worker\u2019s stats snapshot and only logs a worker if its getCount or scanCount is greater than zero:\n\n- Per\u2011worker logging is gated by:\n  - `if snap.getCount > 0 || snap.scanCount > 0 { ... }`\n- Aggregated totals are computed by summing the snapshot counters:\n  - `total.getCount += snap.getCount`, `total.scanCount += snap.scanCount`, and the corresponding latency and error fields.\n- The overall interval log is skipped entirely if both totals are zero:\n  - `if total.getCount == 0 && total.scanCount == 0 { continue }`.\n\nThere is no evidence in this code that packets or connections are counted at the socket/receive level before they are turned into GET/SCAN requests and recorded into workerStats. The stats logger only works with the workerStats counters that have already been incremented. Any request that is dropped, rejected, or bailed out in handleRequest before incrementing getCount/scanCount (or associated latency fields) would not show up in these per\u2011worker or total GET/SCAN counts or latencies. Thus, the reported numbers are limited to requests that make it far enough through processing to update workerStats; they do not automatically include all packets that merely reach the sockets.",
+                "code_snippets": [
+                  {
+                    "path": "internal/server/server.go",
+                    "snippet": "if s.logger == nil || len(s.stats) == 0 {\n\t\treturn\n\t}\n\ts.statsWG.Add(1)\n\tvar total workerStatsSnapshot\n\tfor i := range s.stats {\n\t\tsnap := s.stats[i].snapshotAndReset()\n\t\tif snap.getCount > 0 || snap.scanCount > 0 {\n\t\t\tvar workerAvgGet time.Duration\n\t\t\tif snap.getCount > 0 {\n\t\t\t\tworkerAvgGet = time.Duration(int64(snap.getLatency) / int64(snap.getCount))\n\t\t\t}\n\t\t\tvar workerAvgScan time.Duration\n\t\t\tif snap.scanCount > 0 {\n\t\t\t\tworkerAvgScan = time.Duration(int64(snap.scanLatency) / int64(snap.scanCount))\n\t\t\t}\n\t\t\ts.logger.Printf(\n\t\t\t\t\"[perf] worker=%d gets=%d get_errors=%d avg_get=%s scans=%d scan_errors=%d avg_scan=%s\",\n\t\t\t\ti,\n\t\t\t\tsnap.getCount,\n\t\t\t\tsnap.getErrors,\n\t\t\t\tworkerAvgGet,\n\t\t\t\tsnap.scanCount,\n\t\t\t\tsnap.scanErrors,\n\t\t\t\tworkerAvgScan,\n\t\t\t)\n\t\t}\n\t\ttotal.getCount += snap.getCount\n\t\ttotal.getErrors += snap.getErrors\n\t\ttotal.getLatency += snap.getLatency\n\t\ttotal.scanCount += snap.scanCount\n\t\ttotal.scanErrors += snap.scanErrors\n\t\ttotal.scanLatency += snap.scanLatency\n\t}\n\tif total.getCount == 0 && total.scanCount == 0 {\n\t\tcontinue\n\t}\n\tvar avgGet time.Duration\n\tif total.getCount > 0 {\n\t\tavgGet = time.Duration(int64(total.getLatency) / int64(total.getCount))\n\t}\n\tvar avgScan time.Duration\n\tif total.scanCount > 0 {\n\t\tavgScan = time.Duration(int64(total.scanLatency) / int64(total.scanCount))\n\t}"
+                  },
+                  {
+                    "path": "internal/server/server.go",
+                    "snippet": "s.logger.Printf(\n\t\"[perf] interval=1s gets=%d get_errors=%d avg_get=%s scans=%d scan_errors=%d avg_scan=%s\",\n\ttotal.getCount,\n\ttotal.getErrors,\n\tavgGet,\n\ttotal.scanCount,\n\ttotal.scanErrors,\n\tavgScan,\n)\n"
+                  }
+                ]
+              }
+            },
+            {
+              "question": "In cmd/workload_client/main.go, what timeout or deadline is set on the UDP receive side (ReadFromUDP) and how is it configured relative to the workload duration, and could this cause late responses to be ignored by the client even if the server eventually sends them?",
+              "answer": {
+                "answer": "The UDP receive loop sets a fixed 5\u2011second read deadline on the UDP connection and then keeps renewing it on each timeout, independent of the overall workload duration. Specifically, after creating the UDP connection, the receive goroutine calls:\n\n- `conn.SetReadDeadline(time.Now().Add(5 * time.Second))` once before entering the loop.\n- On each timeout error, it calls `conn.SetReadDeadline(time.Now().Add(5 * time.Second))` again to extend the deadline by another 5 seconds, unless the `quit` channel has been closed.\n\nThis deadline is **not** tied to the configured workload `duration` flag; it is always 5 seconds from \"now\" whenever it is set or reset. As long as the client is still running (i.e., `quit` has not been closed and the connection is not closed), late server responses that arrive within any active 5\u2011second window will still be read, because the deadline is continuously extended after timeouts.\n\nHowever, once the client signals shutdown via `quit` (based on the workload duration logic elsewhere) and the receive goroutine exits\u2014or if the UDP connection is closed\u2014any responses that the server sends after that point will be ignored because there is no longer any receive loop reading from the socket. So late responses that arrive after the client has stopped listening are effectively ignored, but this is due to shutdown rather than the 5\u2011second deadline itself.",
+                "code_snippets": [
+                  {
+                    "path": "cmd/workload_client/main.go",
+                    "snippet": "go func(workerID int, conn *net.UDPConn) {\n\t\t\tdefer recvWG.Done()\n\t\t\tbuf := make([]byte, 64*1024)\n\t\t\t// Set read deadline once to avoid blocking forever\n\t\t\tconn.SetReadDeadline(time.Now().Add(5 * time.Second))\n\t\t\tfor {\n\t\t\t\tn, err := conn.Read(buf)\n\t\t\t\t// Capture receive timestamp immediately\n\t\t\t\trecvNano := time.Now().UnixNano()\n\t\t\t\tif err != nil {\n\t\t\t\t\tif ne, ok := err.(net.Error); ok && ne.Timeout() {\n\t\t\t\t\t\t// Reset deadline on timeout\n\t\t\t\t\t\tconn.SetReadDeadline(time.Now().Add(5 * time.Second))\n\t\t\t\t\t\tselect {\n\t\t\t\t\t\tcase <-quit:\n\t\t\t\t\t\t\treturn\n\t\t\t\t\t\tdefault:\n\t\t\t\t\t\t\tcontinue\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif errors.Is(err, net.ErrClosed) || errors.Is(err, os.ErrClosed) {\n\t\t\t\t\t\treturn\n\t\t\t\t\t}\n\t\t\t\t\tlogger.Printf(\"read error (worker=%d): %v\", workerID, err)\n\t\t\t\t\tcontinue\n\t\t\t\t}\n\n\t\t\t\tfields := bytes.Fields(buf[:n])\n\t\t\t\tif len(fields) < 2 {\n\t\t\t\t\tcontinue\n\t\t\t\t}\n\t\t\t\tsendNano, isGet, ok := parseReqID(fields[1])\n\t\t\t\tif !ok {\n\t\t\t\t\tcontinue\n\t\t\t\t}\n\t\t\t\tlatencyMs := float64(recvNano-sendNano) / 1e6\n\t\t\t\tselect {\n\t\t\t\tcase latencyCh <- latencyRecord{latency: latencyMs, isGet: isGet}:\n\t\t\t\tcase <-quit:\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n\t\t}(workerID, conn)"
+                  },
+                  {
+                    "path": "cmd/workload_client/main.go",
+                    "snippet": "var (\n\t\tserverAddr  = flag.String(\"server\", \"127.0.0.1:9000\", \"UDP server address\")\n\t\tduration    = flag.Duration(\"duration\", 30*time.Second, \"duration of the workload\")\n\t\ttargetRate  = flag.Float64(\"rate\", 1000, \"target send rate (requests per second)\")\n\t\tgetFrac     = flag.Float64(\"get-frac\", 0.8, \"fraction of GET requests; remainder are SCAN\")\n\t\tscanLimit   = flag.Int(\"scan-limit\", 500, \"number of keys per SCAN request\")\n\t\tkeyPrefix   = flag.String(\"key-prefix\", \"key\", \"prefix used when generating keys\")\n\t\tkeySpace    = flag.Int(\"key-space\", 100000, \"upper bound (exclusive) for generated key numbers\")\n\t\tlogPath     = flag.String(\"log\", \"logs/client.log\", \"path to log file\")\n\t\tsendWorkers = flag.Int(\"send-workers\", 1, \"number of concurrent send workers\")\n\t)\n\tflag.Parse()"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "iteration": 2,
+        "assistant_role": "assistant",
+        "assistant_content": {
+          "status": "continue",
+          "Summary": "RAG confirms: (1) the agent policy clears the reuseport target map in Server.New (via clearTargets) before any run, then loads the agent program and sets Active=workers; (2) attach() uses standard SO_ATTACH_REUSEPORT_EBPF; (3) sockets are opened, added to the map, then workers spawned; (4) stats only cover successfully parsed/processed requests; (5) client receive deadlines are continuously extended and only stop when the client shuts down. There is no evidence that kernel/BPF routing is being ignored or overridden in a way that explains the huge tail latencies and missing responses. Instead, the BPF selector is always returning SK_PASS after calling bpf_sk_select_reuseport; if the helper fails (e.g., due to a stale or missing map entry at high load or after prior runs), the packet falls back to the kernel\u2019s default hash-based selection without any visibility in userspace stats, leading to silent drops and large latency spikes.",
+          "hypothesis": {
+            "text": "The simplified agent selector always returns SK_PASS after calling bpf_sk_select_reuseport, so when the helper cannot select a socket (e.g., due to transient or stale map state under load or across runs), packets silently fall back to the kernel\u2019s default reuseport hashing. This mixed routing path, combined with stats that only count fully processed requests, causes many packets to be dropped or delayed in kernel queues without showing up in server metrics, producing the extreme p99 latencies and missing responses at \u226580k rps.",
+            "score": 4
+          },
+          "questions": [
+            "In the generated eBPF bindings for the agent selector (internal/ebpfutil/agentselector_bpf.go or similar), what is the declared max_entries for the PebbleUdpTargets map, and does it exactly match 128 as used in the BPF C program?",
+            "In internal/server/ebpf.go\u2019s pinDirectory/targetMapPath logic, is the pebble_udp_targets map pinned under a run-specific directory (using BPF_PIN_PATH or similar), or could multiple runs share the same pinned map across experiments?",
+            "In internal/server/ebpf.go\u2019s pinDirectory implementation, is the same pin directory used for all policies (agent, round_robin, scan_split, etc.), or does each policy get its own directory and map namespace?",
+            "In internal/server/ebpf.go, are there any other code paths (besides clearTargets in New and updateTargetsMap in Run) that modify or delete entries in the pebble_udp_targets map during the server\u2019s lifetime?",
+            "In internal/server/server.go\u2019s Config.Validate, is cfg.Workers ever adjusted or clamped (e.g., to a minimum or maximum) in a way that could cause a mismatch between the number of workers used to size/clear the map and the actual number of worker sockets opened?"
+          ]
+        },
+        "assistant_content_format": "json",
+        "assistant_content_raw": "{\"status\":\"continue\",\"Summary\":\"RAG confirms: (1) the agent policy clears the reuseport target map in Server.New (via clearTargets) before any run, then loads the agent program and sets Active=workers; (2) attach() uses standard SO_ATTACH_REUSEPORT_EBPF; (3) sockets are opened, added to the map, then workers spawned; (4) stats only cover successfully parsed/processed requests; (5) client receive deadlines are continuously extended and only stop when the client shuts down. There is no evidence that kernel/BPF routing is being ignored or overridden in a way that explains the huge tail latencies and missing responses. Instead, the BPF selector is always returning SK_PASS after calling bpf_sk_select_reuseport; if the helper fails (e.g., due to a stale or missing map entry at high load or after prior runs), the packet falls back to the kernel\u2019s default hash-based selection without any visibility in userspace stats, leading to silent drops and large latency spikes.\",\"hypothesis\":{\"text\":\"The simplified agent selector always returns SK_PASS after calling bpf_sk_select_reuseport, so when the helper cannot select a socket (e.g., due to transient or stale map state under load or across runs), packets silently fall back to the kernel\u2019s default reuseport hashing. This mixed routing path, combined with stats that only count fully processed requests, causes many packets to be dropped or delayed in kernel queues without showing up in server metrics, producing the extreme p99 latencies and missing responses at \u226580k rps.\",\"score\":4},\"questions\":[\"In the generated eBPF bindings for the agent selector (internal/ebpfutil/agentselector_bpf.go or similar), what is the declared max_entries for the PebbleUdpTargets map, and does it exactly match 128 as used in the BPF C program?\",\"In internal/server/ebpf.go\u2019s pinDirectory/targetMapPath logic, is the pebble_udp_targets map pinned under a run-specific directory (using BPF_PIN_PATH or similar), or could multiple runs share the same pinned map across experiments?\",\"In internal/server/ebpf.go\u2019s pinDirectory implementation, is the same pin directory used for all policies (agent, round_robin, scan_split, etc.), or does each policy get its own directory and map namespace?\",\"In internal/server/ebpf.go, are there any other code paths (besides clearTargets in New and updateTargetsMap in Run) that modify or delete entries in the pebble_udp_targets map during the server\u2019s lifetime?\",\"In internal/server/server.go\u2019s Config.Validate, is cfg.Workers ever adjusted or clamped (e.g., to a minimum or maximum) in a way that could cause a mismatch between the number of workers used to size/clear the map and the actual number of worker sockets opened?\"]}",
+        "full_response": {
+          "id": "chatcmpl-CdNJP8ahfpGMWj9WAseydTxJsWXZU",
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "logprobs": null,
+              "message": {
+                "content": "{\"status\":\"continue\",\"Summary\":\"RAG confirms: (1) the agent policy clears the reuseport target map in Server.New (via clearTargets) before any run, then loads the agent program and sets Active=workers; (2) attach() uses standard SO_ATTACH_REUSEPORT_EBPF; (3) sockets are opened, added to the map, then workers spawned; (4) stats only cover successfully parsed/processed requests; (5) client receive deadlines are continuously extended and only stop when the client shuts down. There is no evidence that kernel/BPF routing is being ignored or overridden in a way that explains the huge tail latencies and missing responses. Instead, the BPF selector is always returning SK_PASS after calling bpf_sk_select_reuseport; if the helper fails (e.g., due to a stale or missing map entry at high load or after prior runs), the packet falls back to the kernel\u2019s default hash-based selection without any visibility in userspace stats, leading to silent drops and large latency spikes.\",\"hypothesis\":{\"text\":\"The simplified agent selector always returns SK_PASS after calling bpf_sk_select_reuseport, so when the helper cannot select a socket (e.g., due to transient or stale map state under load or across runs), packets silently fall back to the kernel\u2019s default reuseport hashing. This mixed routing path, combined with stats that only count fully processed requests, causes many packets to be dropped or delayed in kernel queues without showing up in server metrics, producing the extreme p99 latencies and missing responses at \u226580k rps.\",\"score\":4},\"questions\":[\"In the generated eBPF bindings for the agent selector (internal/ebpfutil/agentselector_bpf.go or similar), what is the declared max_entries for the PebbleUdpTargets map, and does it exactly match 128 as used in the BPF C program?\",\"In internal/server/ebpf.go\u2019s pinDirectory/targetMapPath logic, is the pebble_udp_targets map pinned under a run-specific directory (using BPF_PIN_PATH or similar), or could multiple runs share the same pinned map across experiments?\",\"In internal/server/ebpf.go\u2019s pinDirectory implementation, is the same pin directory used for all policies (agent, round_robin, scan_split, etc.), or does each policy get its own directory and map namespace?\",\"In internal/server/ebpf.go, are there any other code paths (besides clearTargets in New and updateTargetsMap in Run) that modify or delete entries in the pebble_udp_targets map during the server\u2019s lifetime?\",\"In internal/server/server.go\u2019s Config.Validate, is cfg.Workers ever adjusted or clamped (e.g., to a minimum or maximum) in a way that could cause a mismatch between the number of workers used to size/clear the map and the actual number of worker sockets opened?\"]}",
+                "refusal": null,
+                "role": "assistant",
+                "annotations": [],
+                "audio": null,
+                "function_call": null,
+                "tool_calls": null
+              }
+            }
+          ],
+          "created": 1763500439,
+          "model": "gpt-5.1-2025-11-13",
+          "object": "chat.completion",
+          "service_tier": "default",
+          "system_fingerprint": null,
+          "usage": {
+            "completion_tokens": 596,
+            "prompt_tokens": 30294,
+            "total_tokens": 30890,
+            "completion_tokens_details": {
+              "accepted_prediction_tokens": 0,
+              "audio_tokens": 0,
+              "reasoning_tokens": 0,
+              "rejected_prediction_tokens": 0
+            },
+            "prompt_tokens_details": {
+              "audio_tokens": 0,
+              "cached_tokens": 25216
+            }
+          }
+        },
+        "rag_results": [
+          {
+            "question": "In the generated eBPF bindings for the agent selector (internal/ebpfutil/agentselector_bpf.go or similar), what is the declared max_entries for the PebbleUdpTargets map, and does it exactly match 128 as used in the BPF C program?",
+            "answer": {
+              "answer": "The PebbleUdpTargets map in the eBPF C program is declared with max_entries set to 128. Any correctly generated Go bindings for this map (such as internal/ebpfutil/agentselector_bpf.go) should therefore declare the map with max_entries = 128 to match the BPF program exactly.\n\nFrom the BPF C definitions:\n- The reuseport sockarray map used by the agent selector is declared with `__uint(max_entries, 128);`\n- The selector logic clamps `active` to 128 and relies on this upper bound.\n\nSo the expected and correct value in the generated bindings is 128, and it must match the BPF side exactly.",
+              "code_snippets": [
+                {
+                  "path": "ebpf/agent.c",
+                  "snippet": "struct {\n    __uint(type, BPF_MAP_TYPE_REUSEPORT_SOCKARRAY);\n    __uint(max_entries, 128);\n    __type(key, __u32);\n    __type(value, __u32);\n    __uint(pinning, LIBBPF_PIN_BY_NAME);\n} pebble_udp_targets SEC(\".maps\");"
+                },
+                {
+                  "path": "ebpf/agent_backup.c",
+                  "snippet": "struct {\n    __uint(type, BPF_MAP_TYPE_REUSEPORT_SOCKARRAY);\n    __uint(max_entries, 128);\n    __type(key, __u32);\n    __type(value, __u32);\n    __uint(pinning, LIBBPF_PIN_BY_NAME);\n} pebble_udp_targets SEC(\".maps\");"
+                },
+                {
+                  "path": "ebpf/agent.c",
+                  "snippet": "    __u32 active = st->active;\n    if (active == 0)\n        return SK_PASS;\n    if (active > 128)\n        active = 128;"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In internal/server/ebpf.go\u2019s pinDirectory/targetMapPath logic, is the pebble_udp_targets map pinned under a run-specific directory (using BPF_PIN_PATH or similar), or could multiple runs share the same pinned map across experiments?",
+            "answer": {
+              "answer": "The map is not pinned under a run\u2011specific directory by default. The pin path is determined by pinDirectory(), which returns BPF_PIN_PATH if set, otherwise BPF_PIN_BASE if set, otherwise the global /sys/fs/bpf. targetMapPath() then always uses filepath.Join(pinDirectory(), \"pebble_udp_targets\"). Since the eBPF map in ebpf/agent.c is declared with LIBBPF_PIN_BY_NAME and the Go code always refers to the same name pebble_udp_targets under that base directory, multiple runs that share the same BPF_PIN_PATH (or the default /sys/fs/bpf when BPF_PIN_PATH/BPF_PIN_BASE are unset) will share the same pinned map across experiments. To isolate runs, BPF_PIN_PATH (or BPF_PIN_BASE) would need to be set to a run\u2011specific directory.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "const defaultPinBase = \"/sys/fs/bpf\"\n\nfunc pinDirectory() string {\n    if path := os.Getenv(\"BPF_PIN_PATH\"); path != \"\" {\n        return path\n    }\n    if base := os.Getenv(\"BPF_PIN_BASE\"); base != \"\" {\n        return base\n    }\n    return defaultPinBase\n}\n\nfunc targetMapPath() string {\n    return filepath.Join(pinDirectory(), \"pebble_udp_targets\")\n}"
+                },
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func updateTargetsMap(slot uint32, fd int) error {\n    m, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n    if err != nil {\n        return fmt.Errorf(\"load target map: %w\", err)\n    }\n    defer m.Close()\n\n    value := uint32(fd)\n    if err := m.Update(&slot, &value, ebpf.UpdateAny); err != nil {\n        return fmt.Errorf(\"update target map: %w\", err)\n    }\n    return nil\n}"
+                },
+                {
+                  "path": "ebpf/agent.c",
+                  "snippet": "struct {\n    __uint(type, BPF_MAP_TYPE_REUSEPORT_SOCKARRAY);\n    __uint(max_entries, 128);\n    __type(key, __u32);\n    __type(value, __u32);\n    __uint(pinning, LIBBPF_PIN_BY_NAME);\n} pebble_udp_targets SEC(\".maps\");"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In internal/server/ebpf.go\u2019s pinDirectory implementation, is the same pin directory used for all policies (agent, round_robin, scan_split, etc.), or does each policy get its own directory and map namespace?",
+            "answer": {
+              "answer": "All policies share the same pin directory. The pinDirectory function returns a single base path (defaulting to \"/sys/fs/bpf\" or overridden by BPF_PIN_PATH/BPF_PIN_BASE), and both loadRoundRobin and loadScanSplit use that same pinDirectory value as the MapOptions.PinPath. There is no per\u2011policy subdirectory or separate map namespace defined in this file; instead, all pinned maps for the different policies live under the same base pin directory, with differentiation coming from the individual map names (e.g., \"pebble_udp_targets\") rather than separate directories.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "const defaultPinBase = \"/sys/fs/bpf\"\n\nfunc pinDirectory() string {\n\tif path := os.Getenv(\"BPF_PIN_PATH\"); path != \"\" {\n\t\treturn path\n\t}\n\tif base := os.Getenv(\"BPF_PIN_BASE\"); base != \"\" {\n\t\treturn base\n\t}\n\treturn defaultPinBase\n}\n\nfunc targetMapPath() string {\n\treturn filepath.Join(pinDirectory(), \"pebble_udp_targets\")\n}"
+                },
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func loadRoundRobin(workers int) (*ebpfPolicy, error) {\n\tif err := ensureRlimit(); err != nil {\n\t\treturn nil, err\n\t}\n\tpinDir := pinDirectory()\n\tif err := ensurePinDirectory(pinDir); err != nil {\n\t\treturn nil, fmt.Errorf(\"ensure pin directory: %w\", err)\n\t}\n\tvar objs ebpfutil.RrSelectorObjects\n\topts := &ebpf.CollectionOptions{\n\t\tMaps: ebpf.MapOptions{PinPath: pinDir},\n\t}\n\tif err := ebpfutil.LoadRrSelectorObjects(&objs, opts); err != nil {\n\t\treturn nil, fmt.Errorf(\"load round robin objects: %w\", err)\n\t}\n\t...\n}"
+                },
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func loadScanSplit(workers int) (*ebpfPolicy, error) {\n\tif err := ensureRlimit(); err != nil {\n\t\treturn nil, err\n\t}\n\tpinDir := pinDirectory()\n\tif err := ensurePinDirectory(pinDir); err != nil {\n\t\treturn nil, fmt.Errorf(\"ensure pin directory: %w\", err)\n\t}\n\tvar objs ebpfutil.ScanSplitSelectorObjects\n\topts := &ebpf.CollectionOptions{\n\t\tMaps: ebpf.MapOptions{PinPath: pinDir},\n\t}\n\tif err := ebpfutil.LoadScanSplitSelectorObjects(&objs, opts); err != nil {\n\t\treturn nil, fmt.Errorf(\"load scan split objects: %w\", err)\n\t}\n\t...\n}"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In internal/server/ebpf.go, are there any other code paths (besides clearTargets in New and updateTargetsMap in Run) that modify or delete entries in the pebble_udp_targets map during the server\u2019s lifetime?",
+            "answer": {
+              "answer": "No. The only functions that modify or delete entries in the pebble_udp_targets map are:\n\n1) updateTargetsMap (used from Run), which updates a key/value in the map.\n2) clearTargets (used from New), which deletes keys from the map.\n\nAside from these two functions, the file only computes the map\u2019s pinned path (targetMapPath) and never performs additional Update or Delete operations on pebble_udp_targets during the server\u2019s lifetime.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/ebpf.go",
+                  "snippet": "func targetMapPath() string {\n\treturn filepath.Join(pinDirectory(), \"pebble_udp_targets\")\n}\n\nfunc updateTargetsMap(slot uint32, fd int) error {\n\tm, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n\tif err != nil {\n\t\treturn fmt.Errorf(\"load target map: %w\", err)\n\t}\n\tdefer m.Close()\n\n\tvalue := uint32(fd)\n\tif err := m.Update(&slot, &value, ebpf.UpdateAny); err != nil {\n\t\treturn fmt.Errorf(\"update target map: %w\", err)\n\t}\n\treturn nil\n}\n\nfunc clearTargets(numSlots int) error {\n\tm, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n\tif err != nil {\n\t\tif errors.Is(err, fs.ErrNotExist) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\t}\n\tdefer m.Close()\n\n\tfor i := 0; i < numSlots; i++ {\n\t\tkey := uint32(i)\n\t\tif err := m.Delete(&key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {\n\t\t\treturn fmt.Errorf(\"clear slot %d: %w\", i, err)\n\t\t}\n\t}\n\treturn nil\n}"
+                },
+                {
+                  "path": "ebpf/agent.c",
+                  "snippet": "struct {\n    __uint(type, BPF_MAP_TYPE_REUSEPORT_SOCKARRAY);\n    __uint(max_entries, 128);\n    __type(key, __u32);\n    __type(value, __u32);\n    __uint(pinning, LIBBPF_PIN_BY_NAME);\n} pebble_udp_targets SEC(\".maps\");"
+                }
+              ]
+            }
+          },
+          {
+            "question": "In internal/server/server.go\u2019s Config.Validate, is cfg.Workers ever adjusted or clamped (e.g., to a minimum or maximum) in a way that could cause a mismatch between the number of workers used to size/clear the map and the actual number of worker sockets opened?",
+            "answer": {
+              "answer": "Yes. The configuration\u2019s worker count is normalized before the server uses it, which prevents any mismatch. In Config.Validate (internal/server/config.go), if Workers is less than or equal to zero, it is set to 1:\n\n- In Config.Validate:\n  - If c.Workers <= 0, then c.Workers = 1.\n\nThis means cfg.Workers is clamped to a minimum of 1 before being used anywhere else, so the number of workers used to size or reset any worker-related state will match the number of worker sockets opened. There is no additional clamping or adjustment elsewhere in the shown server code that would change the effective worker count after validation.",
+              "code_snippets": [
+                {
+                  "path": "internal/server/config.go",
+                  "snippet": "func (c *Config) Validate() error {\n\tif c.ListenAddr == \"\" {\n\t\tc.ListenAddr = \"127.0.0.1:9000\"\n\t}\n\tif c.Workers <= 0 {\n\t\tc.Workers = 1\n\t}\n\tif c.MaxScanKeys <= 0 {\n\t\tc.MaxScanKeys = 100000\n\t}\n\tif c.ReadTimeout <= 0 {\n\t\tc.ReadTimeout = 2 * time.Second\n\t}\n\tif c.WriteTimeout <= 0 {\n\t\tc.WriteTimeout = 2 * time.Second\n\t}\n\tif c.GetDelay <= 0 {\n\t\tc.GetDelay = 10 * time.Microsecond\n\t}\n\tif c.ScanDelay <= 0 {\n\t\tc.ScanDelay = 2 * time.Millisecond\n\t}\n\treturn nil\n}\n"
+                },
+                {
+                  "path": "internal/server/server.go",
+                  "snippet": "type Server struct {\n\tcfg    Config\n\tpolicy *ebpfPolicy\n\tlogger *log.Logger\n\n\tconns   []*net.UDPConn\n\tstats   []workerStats\n\twg      sync.WaitGroup\n\tstatsWG sync.WaitGroup\n}\n"
+                },
+                {
+                  "path": "internal/server/server.go",
+                  "snippet": "func (s *Server) openWorker(idx int) (*net.UDPConn, int, error) {\n\tattachPolicy := s.policy != nil && s.policy.program != nil && idx == 0\n\tvar attachErr error\n\n\tlc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {\n\t\treturn c.Control(func(fd uintptr) {\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEADDR: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEPORT: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif attachPolicy && attachErr == nil {\n\t\t\t\tif err := s.policy.attach(int(fd)); err != nil {\n\t\t\t\t\tattachErr = err\n\t\t\t\t}\n\t\t\t}\n\t\t})\n\t}}\n\n\tpc, err := lc.ListenPacket(context.Background(), \"udp\", s.cfg.ListenAddr)\n\tif err != nil {\n\t\treturn nil, -1, err\n\t}\n\tif attachErr != nil {\n\t\tpc.Close()\n\t\treturn nil, -1, attachErr\n\t}\n\n\tudpConn := pc.(*net.UDPConn)\n\tvar fd int\n\traw, err := udpConn.SyscallConn()\n\tif err != nil {\n\t\tudpConn.Close()\n\t\treturn nil, -1, err\n\t}\n\tif err := raw.Control(func(value uintptr) {\n\t\tfd = int(value)\n\t}); err != nil {\n\t\tudpConn.Close()\n\t\treturn nil, -1, err\n\t}\n\n\treturn udpConn, fd, nil\n}\n"
+                }
+              ]
+            }
+          }
+        ],
+        "parsed_response": {
+          "status": "continue",
+          "Summary": "RAG confirms: (1) the agent policy clears the reuseport target map in Server.New (via clearTargets) before any run, then loads the agent program and sets Active=workers; (2) attach() uses standard SO_ATTACH_REUSEPORT_EBPF; (3) sockets are opened, added to the map, then workers spawned; (4) stats only cover successfully parsed/processed requests; (5) client receive deadlines are continuously extended and only stop when the client shuts down. There is no evidence that kernel/BPF routing is being ignored or overridden in a way that explains the huge tail latencies and missing responses. Instead, the BPF selector is always returning SK_PASS after calling bpf_sk_select_reuseport; if the helper fails (e.g., due to a stale or missing map entry at high load or after prior runs), the packet falls back to the kernel\u2019s default hash-based selection without any visibility in userspace stats, leading to silent drops and large latency spikes.",
+          "hypothesis": {
+            "text": "The simplified agent selector always returns SK_PASS after calling bpf_sk_select_reuseport, so when the helper cannot select a socket (e.g., due to transient or stale map state under load or across runs), packets silently fall back to the kernel\u2019s default reuseport hashing. This mixed routing path, combined with stats that only count fully processed requests, causes many packets to be dropped or delayed in kernel queues without showing up in server metrics, producing the extreme p99 latencies and missing responses at \u226580k rps.",
+            "score": 4
+          },
+          "questions": [
+            "In the generated eBPF bindings for the agent selector (internal/ebpfutil/agentselector_bpf.go or similar), what is the declared max_entries for the PebbleUdpTargets map, and does it exactly match 128 as used in the BPF C program?",
+            "In internal/server/ebpf.go\u2019s pinDirectory/targetMapPath logic, is the pebble_udp_targets map pinned under a run-specific directory (using BPF_PIN_PATH or similar), or could multiple runs share the same pinned map across experiments?",
+            "In internal/server/ebpf.go\u2019s pinDirectory implementation, is the same pin directory used for all policies (agent, round_robin, scan_split, etc.), or does each policy get its own directory and map namespace?",
+            "In internal/server/ebpf.go, are there any other code paths (besides clearTargets in New and updateTargetsMap in Run) that modify or delete entries in the pebble_udp_targets map during the server\u2019s lifetime?",
+            "In internal/server/server.go\u2019s Config.Validate, is cfg.Workers ever adjusted or clamped (e.g., to a minimum or maximum) in a way that could cause a mismatch between the number of workers used to size/clear the map and the actual number of worker sockets opened?"
+          ],
+          "question_answers": [
+            {
+              "question": "In the generated eBPF bindings for the agent selector (internal/ebpfutil/agentselector_bpf.go or similar), what is the declared max_entries for the PebbleUdpTargets map, and does it exactly match 128 as used in the BPF C program?",
+              "answer": {
+                "answer": "The PebbleUdpTargets map in the eBPF C program is declared with max_entries set to 128. Any correctly generated Go bindings for this map (such as internal/ebpfutil/agentselector_bpf.go) should therefore declare the map with max_entries = 128 to match the BPF program exactly.\n\nFrom the BPF C definitions:\n- The reuseport sockarray map used by the agent selector is declared with `__uint(max_entries, 128);`\n- The selector logic clamps `active` to 128 and relies on this upper bound.\n\nSo the expected and correct value in the generated bindings is 128, and it must match the BPF side exactly.",
+                "code_snippets": [
+                  {
+                    "path": "ebpf/agent.c",
+                    "snippet": "struct {\n    __uint(type, BPF_MAP_TYPE_REUSEPORT_SOCKARRAY);\n    __uint(max_entries, 128);\n    __type(key, __u32);\n    __type(value, __u32);\n    __uint(pinning, LIBBPF_PIN_BY_NAME);\n} pebble_udp_targets SEC(\".maps\");"
+                  },
+                  {
+                    "path": "ebpf/agent_backup.c",
+                    "snippet": "struct {\n    __uint(type, BPF_MAP_TYPE_REUSEPORT_SOCKARRAY);\n    __uint(max_entries, 128);\n    __type(key, __u32);\n    __type(value, __u32);\n    __uint(pinning, LIBBPF_PIN_BY_NAME);\n} pebble_udp_targets SEC(\".maps\");"
+                  },
+                  {
+                    "path": "ebpf/agent.c",
+                    "snippet": "    __u32 active = st->active;\n    if (active == 0)\n        return SK_PASS;\n    if (active > 128)\n        active = 128;"
+                  }
+                ]
+              }
+            },
+            {
+              "question": "In internal/server/ebpf.go\u2019s pinDirectory/targetMapPath logic, is the pebble_udp_targets map pinned under a run-specific directory (using BPF_PIN_PATH or similar), or could multiple runs share the same pinned map across experiments?",
+              "answer": {
+                "answer": "The map is not pinned under a run\u2011specific directory by default. The pin path is determined by pinDirectory(), which returns BPF_PIN_PATH if set, otherwise BPF_PIN_BASE if set, otherwise the global /sys/fs/bpf. targetMapPath() then always uses filepath.Join(pinDirectory(), \"pebble_udp_targets\"). Since the eBPF map in ebpf/agent.c is declared with LIBBPF_PIN_BY_NAME and the Go code always refers to the same name pebble_udp_targets under that base directory, multiple runs that share the same BPF_PIN_PATH (or the default /sys/fs/bpf when BPF_PIN_PATH/BPF_PIN_BASE are unset) will share the same pinned map across experiments. To isolate runs, BPF_PIN_PATH (or BPF_PIN_BASE) would need to be set to a run\u2011specific directory.",
+                "code_snippets": [
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "const defaultPinBase = \"/sys/fs/bpf\"\n\nfunc pinDirectory() string {\n    if path := os.Getenv(\"BPF_PIN_PATH\"); path != \"\" {\n        return path\n    }\n    if base := os.Getenv(\"BPF_PIN_BASE\"); base != \"\" {\n        return base\n    }\n    return defaultPinBase\n}\n\nfunc targetMapPath() string {\n    return filepath.Join(pinDirectory(), \"pebble_udp_targets\")\n}"
+                  },
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "func updateTargetsMap(slot uint32, fd int) error {\n    m, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n    if err != nil {\n        return fmt.Errorf(\"load target map: %w\", err)\n    }\n    defer m.Close()\n\n    value := uint32(fd)\n    if err := m.Update(&slot, &value, ebpf.UpdateAny); err != nil {\n        return fmt.Errorf(\"update target map: %w\", err)\n    }\n    return nil\n}"
+                  },
+                  {
+                    "path": "ebpf/agent.c",
+                    "snippet": "struct {\n    __uint(type, BPF_MAP_TYPE_REUSEPORT_SOCKARRAY);\n    __uint(max_entries, 128);\n    __type(key, __u32);\n    __type(value, __u32);\n    __uint(pinning, LIBBPF_PIN_BY_NAME);\n} pebble_udp_targets SEC(\".maps\");"
+                  }
+                ]
+              }
+            },
+            {
+              "question": "In internal/server/ebpf.go\u2019s pinDirectory implementation, is the same pin directory used for all policies (agent, round_robin, scan_split, etc.), or does each policy get its own directory and map namespace?",
+              "answer": {
+                "answer": "All policies share the same pin directory. The pinDirectory function returns a single base path (defaulting to \"/sys/fs/bpf\" or overridden by BPF_PIN_PATH/BPF_PIN_BASE), and both loadRoundRobin and loadScanSplit use that same pinDirectory value as the MapOptions.PinPath. There is no per\u2011policy subdirectory or separate map namespace defined in this file; instead, all pinned maps for the different policies live under the same base pin directory, with differentiation coming from the individual map names (e.g., \"pebble_udp_targets\") rather than separate directories.",
+                "code_snippets": [
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "const defaultPinBase = \"/sys/fs/bpf\"\n\nfunc pinDirectory() string {\n\tif path := os.Getenv(\"BPF_PIN_PATH\"); path != \"\" {\n\t\treturn path\n\t}\n\tif base := os.Getenv(\"BPF_PIN_BASE\"); base != \"\" {\n\t\treturn base\n\t}\n\treturn defaultPinBase\n}\n\nfunc targetMapPath() string {\n\treturn filepath.Join(pinDirectory(), \"pebble_udp_targets\")\n}"
+                  },
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "func loadRoundRobin(workers int) (*ebpfPolicy, error) {\n\tif err := ensureRlimit(); err != nil {\n\t\treturn nil, err\n\t}\n\tpinDir := pinDirectory()\n\tif err := ensurePinDirectory(pinDir); err != nil {\n\t\treturn nil, fmt.Errorf(\"ensure pin directory: %w\", err)\n\t}\n\tvar objs ebpfutil.RrSelectorObjects\n\topts := &ebpf.CollectionOptions{\n\t\tMaps: ebpf.MapOptions{PinPath: pinDir},\n\t}\n\tif err := ebpfutil.LoadRrSelectorObjects(&objs, opts); err != nil {\n\t\treturn nil, fmt.Errorf(\"load round robin objects: %w\", err)\n\t}\n\t...\n}"
+                  },
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "func loadScanSplit(workers int) (*ebpfPolicy, error) {\n\tif err := ensureRlimit(); err != nil {\n\t\treturn nil, err\n\t}\n\tpinDir := pinDirectory()\n\tif err := ensurePinDirectory(pinDir); err != nil {\n\t\treturn nil, fmt.Errorf(\"ensure pin directory: %w\", err)\n\t}\n\tvar objs ebpfutil.ScanSplitSelectorObjects\n\topts := &ebpf.CollectionOptions{\n\t\tMaps: ebpf.MapOptions{PinPath: pinDir},\n\t}\n\tif err := ebpfutil.LoadScanSplitSelectorObjects(&objs, opts); err != nil {\n\t\treturn nil, fmt.Errorf(\"load scan split objects: %w\", err)\n\t}\n\t...\n}"
+                  }
+                ]
+              }
+            },
+            {
+              "question": "In internal/server/ebpf.go, are there any other code paths (besides clearTargets in New and updateTargetsMap in Run) that modify or delete entries in the pebble_udp_targets map during the server\u2019s lifetime?",
+              "answer": {
+                "answer": "No. The only functions that modify or delete entries in the pebble_udp_targets map are:\n\n1) updateTargetsMap (used from Run), which updates a key/value in the map.\n2) clearTargets (used from New), which deletes keys from the map.\n\nAside from these two functions, the file only computes the map\u2019s pinned path (targetMapPath) and never performs additional Update or Delete operations on pebble_udp_targets during the server\u2019s lifetime.",
+                "code_snippets": [
+                  {
+                    "path": "internal/server/ebpf.go",
+                    "snippet": "func targetMapPath() string {\n\treturn filepath.Join(pinDirectory(), \"pebble_udp_targets\")\n}\n\nfunc updateTargetsMap(slot uint32, fd int) error {\n\tm, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n\tif err != nil {\n\t\treturn fmt.Errorf(\"load target map: %w\", err)\n\t}\n\tdefer m.Close()\n\n\tvalue := uint32(fd)\n\tif err := m.Update(&slot, &value, ebpf.UpdateAny); err != nil {\n\t\treturn fmt.Errorf(\"update target map: %w\", err)\n\t}\n\treturn nil\n}\n\nfunc clearTargets(numSlots int) error {\n\tm, err := ebpf.LoadPinnedMap(targetMapPath(), nil)\n\tif err != nil {\n\t\tif errors.Is(err, fs.ErrNotExist) {\n\t\t\treturn nil\n\t\t}\n\t\treturn err\n\t}\n\tdefer m.Close()\n\n\tfor i := 0; i < numSlots; i++ {\n\t\tkey := uint32(i)\n\t\tif err := m.Delete(&key); err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {\n\t\t\treturn fmt.Errorf(\"clear slot %d: %w\", i, err)\n\t\t}\n\t}\n\treturn nil\n}"
+                  },
+                  {
+                    "path": "ebpf/agent.c",
+                    "snippet": "struct {\n    __uint(type, BPF_MAP_TYPE_REUSEPORT_SOCKARRAY);\n    __uint(max_entries, 128);\n    __type(key, __u32);\n    __type(value, __u32);\n    __uint(pinning, LIBBPF_PIN_BY_NAME);\n} pebble_udp_targets SEC(\".maps\");"
+                  }
+                ]
+              }
+            },
+            {
+              "question": "In internal/server/server.go\u2019s Config.Validate, is cfg.Workers ever adjusted or clamped (e.g., to a minimum or maximum) in a way that could cause a mismatch between the number of workers used to size/clear the map and the actual number of worker sockets opened?",
+              "answer": {
+                "answer": "Yes. The configuration\u2019s worker count is normalized before the server uses it, which prevents any mismatch. In Config.Validate (internal/server/config.go), if Workers is less than or equal to zero, it is set to 1:\n\n- In Config.Validate:\n  - If c.Workers <= 0, then c.Workers = 1.\n\nThis means cfg.Workers is clamped to a minimum of 1 before being used anywhere else, so the number of workers used to size or reset any worker-related state will match the number of worker sockets opened. There is no additional clamping or adjustment elsewhere in the shown server code that would change the effective worker count after validation.",
+                "code_snippets": [
+                  {
+                    "path": "internal/server/config.go",
+                    "snippet": "func (c *Config) Validate() error {\n\tif c.ListenAddr == \"\" {\n\t\tc.ListenAddr = \"127.0.0.1:9000\"\n\t}\n\tif c.Workers <= 0 {\n\t\tc.Workers = 1\n\t}\n\tif c.MaxScanKeys <= 0 {\n\t\tc.MaxScanKeys = 100000\n\t}\n\tif c.ReadTimeout <= 0 {\n\t\tc.ReadTimeout = 2 * time.Second\n\t}\n\tif c.WriteTimeout <= 0 {\n\t\tc.WriteTimeout = 2 * time.Second\n\t}\n\tif c.GetDelay <= 0 {\n\t\tc.GetDelay = 10 * time.Microsecond\n\t}\n\tif c.ScanDelay <= 0 {\n\t\tc.ScanDelay = 2 * time.Millisecond\n\t}\n\treturn nil\n}\n"
+                  },
+                  {
+                    "path": "internal/server/server.go",
+                    "snippet": "type Server struct {\n\tcfg    Config\n\tpolicy *ebpfPolicy\n\tlogger *log.Logger\n\n\tconns   []*net.UDPConn\n\tstats   []workerStats\n\twg      sync.WaitGroup\n\tstatsWG sync.WaitGroup\n}\n"
+                  },
+                  {
+                    "path": "internal/server/server.go",
+                    "snippet": "func (s *Server) openWorker(idx int) (*net.UDPConn, int, error) {\n\tattachPolicy := s.policy != nil && s.policy.program != nil && idx == 0\n\tvar attachErr error\n\n\tlc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {\n\t\treturn c.Control(func(fd uintptr) {\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEADDR: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEPORT: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif attachPolicy && attachErr == nil {\n\t\t\t\tif err := s.policy.attach(int(fd)); err != nil {\n\t\t\t\t\tattachErr = err\n\t\t\t\t}\n\t\t\t}\n\t\t})\n\t}}\n\n\tpc, err := lc.ListenPacket(context.Background(), \"udp\", s.cfg.ListenAddr)\n\tif err != nil {\n\t\treturn nil, -1, err\n\t}\n\tif attachErr != nil {\n\t\tpc.Close()\n\t\treturn nil, -1, attachErr\n\t}\n\n\tudpConn := pc.(*net.UDPConn)\n\tvar fd int\n\traw, err := udpConn.SyscallConn()\n\tif err != nil {\n\t\tudpConn.Close()\n\t\treturn nil, -1, err\n\t}\n\tif err := raw.Control(func(value uintptr) {\n\t\tfd = int(value)\n\t}); err != nil {\n\t\tudpConn.Close()\n\t\treturn nil, -1, err\n\t}\n\n\treturn udpConn, fd, nil\n}\n"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

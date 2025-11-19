@@ -103,7 +103,7 @@ def configure_llamaindex(api_key: str) -> None:
     Args:
         api_key: OpenAI API key used for the chat/model endpoints.
     """
-    llm_kwargs = {"model": "gpt-5.1", "api_key": api_key, "temperature": 0.3}
+    llm_kwargs = {"model": "gpt-5.1", "api_key": api_key, "temperature": 0.7}
     try:
         Settings.llm = OpenAI(system_prompt=RAG_SYSTEM_PROMPT, **llm_kwargs)
     except TypeError:
