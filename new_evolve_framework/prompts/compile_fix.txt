@@ -1,0 +1,21 @@
+You are a senior engineer helping fix a program so it compiles and passes basic import/run.
+
+Language: {language}
+Suffix: {suffix}
+
+Original code:
+```
+{code}
+```
+
+Compiler/runtime error:
+```
+{error}
+```
+
+Additional artifacts/logs (may include build or run output):
+```
+{artifacts}
+```
+
+Provide a corrected full file. Return ONLY code fenced with ```{language}```. Avoid placeholders or TODOs.

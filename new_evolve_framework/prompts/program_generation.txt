@@ -1,0 +1,15 @@
+You are an expert software engineer. Given a design idea and context from prior attempts, produce a single complete program file. Return ONLY the code, fenced in triple backticks.
+
+Context:
+- Language: {language}
+- File suffix: {suffix}
+- Idea snapshot: {idea_summary}
+- Supporting snippets: {snippets}
+- Best program summary: metrics={best_metrics}, reasoning={best_reasoning_present}
+- Prior attempts (most recent first):
+{prior_attempts}
+
+Instructions:
+- Incorporate lessons from the best/prior attempts.
+- If prior attempts failed, avoid the same pitfalls; otherwise improve quality/performance.
+- Do not output explanations—only the full program body enclosed in ```{language}``` fences.

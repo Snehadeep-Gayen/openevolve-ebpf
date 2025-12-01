@@ -1,0 +1,121 @@
+{
+  "iterations": [
+    {
+      "iteration": 0,
+      "idea_payload": {
+        "status": "continue",
+        "design_doc": {
+          "goals": [
+            "Reduce p99 latency and tail amplification caused by head-of-line blocking between long SCAN requests and short GET requests, while keeping overall throughput high.",
+            "Preserve the now-even load distribution across workers (fixed hash collision issue) but add request-class awareness so GETs are not queued behind SCANs on the same reuseport socket.",
+            "Keep the eBPF program self-contained: no userspace configuration or tuning knobs, only internal constants and (optionally) lightweight use of the existing pebble_agent_state map.",
+            "Minimize additional per-packet overhead in the selector (simple payload classification + simple arithmetic; avoid complex state machines or heavy branching).",
+            "Design the selector so it remains robust as total QPS scales (and as the number of SO_REUSEPORT sockets/workers changes), without reconfiguration."
+          ],
+          "evidence": [
+            "Workload composition is highly skewed: ~99.5% GET requests with ~10\u00b5s nominal service time, and ~0.5% SCAN requests with ~2ms nominal service time (\u2248200x slower).",
+            "Under the current agent policy with even worker distribution, p99 latency is extremely high vs service time: ~552 ms at 50k qps, then multi-second (2.6\u20136.4 s) at higher rates, despite mean latencies staying near the configured service times.",
+            "Server throughput per core is high and workers appear balanced without obvious hotspots, indicating that the basic reuseport hashing works and overall CPU is being used efficiently.",
+            "Client-side backlogs grow unbounded at \u226560k qps, with many missing responses, signaling severe queueing and effectively unbounded per-request wait times once the system passes its stable operating point.",
+            "Given that SCANs are rare but very long, a uniform per-socket mix of GET and SCAN traffic naturally causes head-of-line blocking on each worker\u2019s queue: a few SCANs per worker can stall many queued GETs, inflating tail latency even though the mean remains close to nominal."
+          ],
+          "architecture": [
+            "Classify each incoming UDP datagram in the AgentUDPSelector eBPF program by inspecting the first few payload bytes and treating messages starting with the SCAN verb (exact pattern to be confirmed) as SCAN; all others are treated as GET.",
+            "Partition the reuseport socket array into two contiguous groups at selection time: a small, fixed-size SCAN group (e.g., max(1, num_socks / 8) slots) and a larger GET group (remaining slots). Use the existing 4\u2011tuple hash (post\u2013hash-collision fix) but apply it separately within the chosen group, so GETs are evenly spread across GET-only workers and SCANs across SCAN-only workers.",
+            "Keep the program self-contained by deriving group sizes solely from the observed num_socks and compile-time constants; do not depend on userspace to preconfigure role assignments. Optionally, use pebble_agent_state only for lightweight counters/telemetry, not for core routing decisions in the first iteration.",
+            "Ensure that routing is strictly per-packet (based on the current message\u2019s verb), so mixed GET/SCAN traffic from the same client is naturally separated across GET and SCAN worker groups, reducing per-socket head-of-line blocking without needing additional flow state."
+          ],
+          "risks": [
+            "The exact wire format and verb encoding for GET vs SCAN is not yet confirmed; misclassifying packets (e.g., due to different prefixes, case, or framing) would break request handling or negate the separation benefits.",
+            "The mapping from reuseport socket index to worker goroutine/thread is assumed to be stable and homogeneous; if userspace treats all workers identically and does not expect some sockets to receive almost exclusively SCANs, this could create unintended load patterns or interfere with any existing worker specialization.",
+            "The structure and intended usage of the pebble_agent_state map on the userspace side is not yet fully known; repurposing or extending it from eBPF could conflict with existing fields or invariants if not carefully coordinated.",
+            "The chosen static fraction of SCAN-dedicated sockets (e.g., num_socks / 8) may underprovision or overprovision SCAN capacity for some combinations of total QPS and worker count; if underprovisioned, SCAN workers will saturate, and if heavily overprovisioned, GET throughput and efficiency could suffer.",
+            "It is not yet clear how many SO_REUSEPORT sockets are used in typical runs, nor whether workers are pinned to specific CPUs; this affects how strongly GET latency benefits from isolating SCANs, and could motivate a more adaptive split in a later iteration."
+          ]
+        },
+        "questions": [
+          "Where in the server code are UDP GET vs SCAN requests parsed and identified (file and function name), and what exact string or byte sequence is used to distinguish SCAN from GET on the wire?",
+          "In the code that sets up the UDP listener and SO_REUSEPORT sockets (the place where AgentUDPSelector is attached), how many sockets are created per port, and how are they mapped to worker goroutines/threads?",
+          "How is the pebble_agent_state BPF map defined on the userspace side (key type and value struct layout), and which of its fields are currently read or written by userspace code?",
+          "When AgentUDPSelector is loaded and attached, does any userspace configuration specify roles or priorities for individual reuseport sockets (e.g., marking some workers as special), or are all workers currently treated identically?",
+          "Are worker goroutines/threads pinned to specific CPU cores, and if so, where in the code is the pinning or affinity for reuseport sockets configured?"
+        ]
+      },
+      "rag_answers": [
+        {
+          "question": "Where in the server code are UDP GET vs SCAN requests parsed and identified (file and function name), and what exact string or byte sequence is used to distinguish SCAN from GET on the wire?",
+          "answer": {
+            "error": "Failed to query RAG: Unable to import llama_rag.py. Ensure dependencies are installed and the project root is on PYTHONPATH."
+          }
+        },
+        {
+          "question": "In the code that sets up the UDP listener and SO_REUSEPORT sockets (the place where AgentUDPSelector is attached), how many sockets are created per port, and how are they mapped to worker goroutines/threads?",
+          "answer": {
+            "error": "Failed to query RAG: Unable to import llama_rag.py. Ensure dependencies are installed and the project root is on PYTHONPATH."
+          }
+        },
+        {
+          "question": "How is the pebble_agent_state BPF map defined on the userspace side (key type and value struct layout), and which of its fields are currently read or written by userspace code?",
+          "answer": {
+            "error": "Failed to query RAG: module 'llama_rag' has no attribute 'configure_llamaindex'"
+          }
+        },
+        {
+          "question": "When AgentUDPSelector is loaded and attached, does any userspace configuration specify roles or priorities for individual reuseport sockets (e.g., marking some workers as special), or are all workers currently treated identically?",
+          "answer": {
+            "error": "Failed to query RAG: module 'llama_rag' has no attribute 'configure_llamaindex'"
+          }
+        },
+        {
+          "question": "Are worker goroutines/threads pinned to specific CPU cores, and if so, where in the code is the pinning or affinity for reuseport sockets configured?",
+          "answer": {
+            "error": "Failed to query RAG: module 'llama_rag' has no attribute 'configure_llamaindex'"
+          }
+        }
+      ]
+    },
+    {
+      "iteration": 1,
+      "idea_payload": {
+        "status": "continue",
+        "design_doc": {
+          "goals": [
+            "Reduce p99 latency and tail amplification driven by head-of-line blocking between long SCAN requests and short GET requests, without materially sacrificing total throughput.",
+            "Exploit the already-even hash-based distribution across SO_REUSEPORT workers, but introduce request-class awareness so GETs are routed away from SCAN-heavy queues.",
+            "Keep the eBPF AgentUDPSelector program self-contained (no userspace configuration or protocols), with only simple payload inspection and arithmetic, and no new BPF maps.",
+            "Avoid relying on unknown pebble_agent_state layout: the first iteration should work correctly even if pebble_agent_state is read-only or unused.",
+            "Make the design robust across different numbers of reuseport sockets/workers and load levels, by deriving any partitioning solely from num_socks and compile-time constants."
+          ],
+          "evidence": [
+            "Workload composition is highly skewed: approximately 99.5% GET requests (~10\u00b5s nominal service time) and 0.5% SCAN requests (~2ms nominal service time, ~200x slower).",
+            "Under the current agent policy (with even worker distribution and fixed hash collision issue), p99 latency is extremely high versus the nominal service time: ~552 ms at 50k qps and multi-second (2.6\u20136.4 s) at higher rates, while means remain near configured service delays.",
+            "Server-side throughput is high and workers appear balanced without obvious hotspots, suggesting that basic reuseport hashing is effective and CPU is well utilized.",
+            "Client backlogs grow unbounded at \u226560k qps, with many unresolved operations at the end of runs, pointing to severe queueing and operation of the system beyond its stable capacity.",
+            "Given a small fraction of very long SCANs mixed uniformly with many short GETs on each worker queue, head-of-line blocking on each socket is expected to inflate GET tail latency even if average load per worker is balanced."
+          ],
+          "architecture": [
+            "Classify each incoming UDP datagram inside AgentUDPSelector by inspecting the start of the payload: if the leading bytes match the SCAN verb encoding used on the wire (e.g., ASCII \"SCAN\" or an opcode value), treat as SCAN; otherwise treat as GET. This is a single, early branch based on a small, fixed number of bytes.",
+            "At selection time, partition the reuseport socket array into two logical groups derived from the observed num_socks and a compile-time constant SCAN_FRACTION (e.g., 1/8): a small SCAN group of size scan_socks = max(1, num_socks / SCAN_DIVISOR) at the beginning of the array [0..scan_socks-1], and a larger GET group [scan_socks..num_socks-1]. No userspace role configuration is required.",
+            "Use the existing improved 4\u2011tuple hash (that already fixed hash collisions) to generate a base hash for each packet, then map it into the appropriate group: for GET, index = scan_socks + (hash % (num_socks - scan_socks)); for SCAN, index = (hash % scan_socks). This keeps GETs evenly spread across GET-only workers, and SCANs across a small set of SCAN-focused workers.",
+            "Ensure routing is strictly per-packet: classification and group selection depend only on the current datagram. This naturally separates mixed GET/SCAN traffic from the same client without storing any per-flow state, thus eliminating most head-of-line blocking between classes on each worker while preserving hash-based fairness within each class."
+          ],
+          "risks": [
+            "The exact encoding and position of GET vs SCAN identifiers in the UDP payload is currently unknown due to RAG failures; the design assumes a simple, fixed-position verb or opcode. If the real protocol differs (e.g., length-prefixed, binary header, or case-insensitive text), the classifier must be adjusted accordingly.",
+            "The actual number of SO_REUSEPORT sockets and their mapping to worker goroutines/threads is unknown; the proposed proportional split between SCAN and GET workers (e.g., num_socks / 8) is based on the 99.5%/0.5% workload mix and may require minor tuning once the real worker count is confirmed.",
+            "Because the layout of the pebble_agent_state map is unknown on both kernel and userspace sides, the first iteration should avoid writing new fields or changing its schema; otherwise we risk breaking existing userspace expectations. This constrains us to a purely stateless selector for now.",
+            "If SCAN traffic volume or service time deviates significantly from the assumed 0.5% / 2ms (e.g., SCANs are more frequent or more expensive), a static fraction of SCAN-dedicated sockets may underprovision SCAN capacity, causing very high SCAN latency even as GET latency improves.",
+            "In the corner case of a very small number of sockets (e.g., num_socks \u2264 2), the ability to effectively isolate SCAN and GET traffic is limited; the design must gracefully fall back to either no separation or a single SCAN socket without introducing incorrect behavior."
+          ]
+        },
+        "questions": [
+          "In the client or protocol implementation, what is the exact on-the-wire format of a UDP GET request and a UDP SCAN request (please provide a concrete example payload for each, both in ASCII and hex)?",
+          "In the eBPF C source file that defines AgentUDPSelector, how is num_socks (the number of reuseport sockets) obtained and what is the exact type and layout of the reuseport array passed to the selector?",
+          "Where in the eBPF C code is the pebble_agent_state map declared (file and struct definition), and what fields does struct pebble_agent_state currently contain that are safe for the selector to read or update?",
+          "In the server-side code that binds and configures the UDP SO_REUSEPORT sockets (the code that attaches AgentUDPSelector), what is the default or typical number of sockets created per port, and is this number tied directly to the worker count?",
+          "Is there an existing constant or configuration in the codebase that reflects the expected ratio of SCAN to GET operations (e.g., 0.5% SCAN), and if so, where is it defined and how is it used?"
+        ]
+      },
+      "rag_answers": []
+    }
+  ]
+}

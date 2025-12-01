@@ -1,0 +1,210 @@
+{
+  "iterations": [
+    {
+      "iteration": 0,
+      "idea_payload": {
+        "design_doc": {
+          "goals": [
+            "Eliminate pathological concentration of traffic on a subset of reuseport sockets when the client uses only a small fixed set of UDP flows, ensuring all active workers receive load.",
+            "Prevent head-of-line blocking where rare, long SCAN requests delay the vast majority of short GET requests on the same worker queue.",
+            "Keep the selector self-contained in eBPF, using only AgentUDPSelector and the existing pebble_agent_state map, with no new maps or userspace configuration.",
+            "Preserve high sustainable throughput and low p99 latency for GETs at and above 100k RPS, while allowing SCANs to complete without destabilizing the system."
+          ],
+          "evidence": [
+            "Current selector uses a pure flow-hash modulo active-workers (hash % 6), with a small set of client UDP 5-tuples, leading in practice to only 4 of 6 sockets receiving traffic in each run.",
+            "Perf logs show exactly 4 workers active per run, with which 4 change between runs, consistent with deterministic but unlucky hashing of a small 5-tuple set into a 4-of-6 subset.",
+            "At 50\u201360k RPS, the effective 4-worker capacity is sufficient, so p99 latency is low and responses are not missing; at \u226580k RPS, those 4 workers saturate, queues fill, UDP drops occur, and multi-second p99 latencies appear despite constant per-request service cost.",
+            "Workload mix is about 99.5% short GET requests and 0.5% long SCAN requests; once distribution across workers is fixed, rare long SCANs sharing a worker and socket-queue with many GETs create head-of-line blocking that disproportionately inflates GET tail latency."
+          ],
+          "architecture": [
+            "Abandon 5-tuple affinity and select the reuseport slot per datagram using a fast per-packet random choice (for example via a kernel random helper or a simple hash of payload bytes) so that, even with few client flows, all num_sockets workers are used uniformly over time.",
+            "Classify incoming UDP datagrams as GET vs SCAN based on their UDP payload length, using a fixed byte-size threshold chosen between the observed GET and SCAN message sizes.",
+            "Partition the reuseport sockets into two disjoint index ranges inside the eBPF program: one small range (for example 1 of 6 workers, or a small fraction derived from num_sockets) reserved for SCAN traffic only, and the remaining larger range reserved for GET (and any other short) traffic.",
+            "For each GET packet, randomly choose a worker index uniformly within the GET range; for each SCAN packet, randomly choose within the SCAN range, optionally updating lightweight counters in pebble_agent_state for observability but not for decision-making, so SCANs never share socket queues with GETs and cannot cause head-of-line blocking for them."
+          ],
+          "risks": [
+            "The exact GET and SCAN message formats and typical payload sizes are not fully known; misplacing the payload-length threshold could misclassify traffic and either reintroduce head-of-line blocking (if SCANs are misclassified as GETs) or waste capacity (if many GETs are misclassified as SCANs).",
+            "It is uncertain whether the AgentUDPSelector program type in this codebase is allowed to call the bpf_get_prandom_u32 helper; if not, a simple hash of stable header+payload bytes must be used instead, and we need to confirm this constraint from the existing selector implementation.",
+            "The current usage and layout of the pebble_agent_state map are not fully known; reusing fields for counters or per-slot metadata may conflict with expectations in userspace if that map is already interpreted there.",
+            "The server code may rely on implicit per-flow or per-client affinity (for example, caching or tracking client state keyed by address/port within a worker); removing 5-tuple stickiness and randomly distributing packets could break such assumptions if they exist.",
+            "The fixed fraction of workers dedicated to SCAN traffic is tuned to the current workload (about 0.5% SCANs at ~100k RPS); if SCAN rate, SCAN service time, or number of workers changes significantly, this static partition could underprovision SCAN capacity or leave workers underutilized, requiring a future revision or dynamic scheme."
+          ]
+        },
+        "questions": [
+          "Where in the server codebase are UDP request messages parsed and classified into GET vs SCAN (file and function), and what exact condition or field is used to distinguish them?",
+          "What are the typical and maximum UDP payload sizes for GET and SCAN requests as defined in the server or client code (please include any constants or struct definitions that determine these sizes)?",
+          "In the code where reuseport worker sockets are created and bound (file and function), how many sockets are created by default, and is this number configurable at runtime or build time?",
+          "Where is the pebble_agent_state BPF map defined (C and/or Go binding), and what is the full layout of its key and value types, including any existing fields that the eBPF program is expected to maintain or that userspace reads?",
+          "Search the server codebase for any per-client or per-flow state keyed by UDP source address or 5-tuple (for example maps or caches indexed by addr/port); list the locations and describe whether this state is worker-local or shared across workers."
+        ]
+      },
+      "rag_answers": [
+        {
+          "question": "Where in the server codebase are UDP request messages parsed and classified into GET vs SCAN (file and function), and what exact condition or field is used to distinguish them?",
+          "answer": {
+            "answer": "UDP request messages are parsed and classified into GET vs SCAN in the file `internal/server/handler.go`, inside the function `parseRequest`. The distinction is made by inspecting the first whitespace\u2011delimited field of the payload (`cmdField := fields[0]`) and comparing it case\u2011insensitively against the ASCII strings \"GET\" and \"SCAN\" using `equalFoldASCII(cmdField, \"GET\")` and `equalFoldASCII(cmdField, \"SCAN\")`.\n\nOnly requests whose first token matches \"GET\" or \"SCAN\" (ignoring ASCII case) are accepted; anything else results in an `errUnknownCommand` error.",
+            "code_snippets": [
+              {
+                "path": "internal/server/handler.go",
+                "snippet": "func parseRequest(payload []byte) (cmd string, args []string, err error) {\n\ttrimmed := bytes.TrimSpace(payload)\n\t...\n\tfields := bytes.Fields(trimmed)\n\t...\n\tcmdField := fields[0]\n\n\tswitch {\n\tcase equalFoldASCII(cmdField, \"GET\"):\n\t\tif len(fields) != 2 && len(fields) != 3 {\n\t\t\treturn \"\", nil, fmt.Errorf(\"GET expects key [request-id]: %w\", errMalformed)\n\t\t}\n\t\tcmd = \"GET\"\n\tcase equalFoldASCII(cmdField, \"SCAN\"):\n\t\tif len(fields) != 3 && len(fields) != 4 {\n\t\t\treturn \"\", nil, fmt.Errorf(\"SCAN expects start_key limit [request-id]: %w\", errMalformed)\n\t\t}\n\t\tcmd = \"SCAN\"\n\tdefault:\n\t\treturn \"\", nil, errUnknownCommand\n\t}\n\t...\n}\n\nfunc equalFoldASCII(b []byte, s string) bool {\n\tif len(b) != len(s) {\n\t\treturn false\n\t}\n\tfor i := 0; i < len(b); i++ {\n\t\tcb := b[i]\n\t\tcs := s[i]\n\t\tif 'A' <= cs && cs <= 'Z' {\n\t\t\tcs += 'a' - 'A'\n\t\t}\n\t\tif 'A' <= cb && cb <= 'Z' {\n\t\t\tcb += 'a' - 'A'\n\t\t}\n\t\tif cb != cs {\n\t\t\treturn false\n\t\t}\n\t}\n\treturn true\n}"
+              },
+              {
+                "path": "internal/server/server.go",
+                "snippet": "func (s *Server) handleRequest(idx int, payload []byte) []byte {\n\tcmd, args, err := parseRequest(payload)\n\tif err != nil {\n\t\treturn []byte(fmt.Sprintf(\"ERR %v\", err))\n\t}\n\n\t...\n\tswitch cmd {\n\tcase \"GET\":\n\t\t...\n\tcase \"SCAN\":\n\t\t...\n\tdefault:\n\t\treturn []byte(\"ERR unknown command\")\n\t}\n}"
+              }
+            ]
+          }
+        },
+        {
+          "question": "What are the typical and maximum UDP payload sizes for GET and SCAN requests as defined in the server or client code (please include any constants or struct definitions that determine these sizes)?",
+          "answer": {
+            "answer": "The client constructs GET and SCAN UDP request payloads as simple ASCII text lines using `buildPayload` and `appendKey`, without an explicit fixed maximum, but their typical sizes can be inferred from how they are built.\n\nGET request format:\n- Structure: `\"GET \" + key + \" \" + reqID`\n- The key is generated by `appendKey`, which uses `keyPrefix` (default: \"key\") and an 8\u2011digit zero\u2011padded integer when `keyIdx < 100000000`.\n- With defaults, key is `\"key\" + 8 digits` \u2192 3 + 8 = 11 characters.\n- The request ID (`reqID`) is produced by `makeReqID` (not shown here), and is appended as text.\n- So typical GET payload length = len(\"GET \") + len(key) + 1 space + len(reqID).\n  With default-style key: 4 + 11 + 1 + len(reqID) \u2248 16 + len(reqID) bytes.\n\nSCAN request format:\n- Structure: `\"SCAN \" + key + \" \" + scanLimit + \" \" + reqID`\n- `scanLimit` is appended as a base\u201110 integer with `strconv.AppendInt`; default flag `-scan-limit` is 500.\n- So typical SCAN payload length = len(\"SCAN \") + len(key) + 1 space + len(strconv.Itoa(scanLimit)) + 1 space + len(reqID).\n  With defaults: 5 + 11 + 1 + 3 (\"500\") + 1 + len(reqID) \u2248 21 + len(reqID) bytes.\n\nMaximum sizes implied by code paths:\n- `appendKey` pads to exactly 8 digits when `keyIdx < 100000000`, but if `keyIdx >= 100000000` it falls back to `strconv.AppendInt`, so the key can grow beyond 8 digits depending on `keySpace`.\n- `keySpace` is a flag (`-key-space`) with default 100000, and the code validates it is positive but does not enforce an upper bound, so keys and thus payloads can be larger if `keySpace` is increased beyond 100000000.\n- `scanLimit` is also a flag with no explicit upper bound other than being an `int`, so the decimal length of `scanLimit` can increase the payload size further.\n- The send buffer for building payloads is allocated as `make([]byte, 0, 256)` per worker, which provides a *typical* working capacity of 256 bytes for the request line, but the code does not check or enforce this as a hard maximum: if the payload grows beyond 256 bytes, Go slices will reallocate to accommodate it.\n\nThere are no constants or struct definitions that set a strict *maximum* UDP payload size for GET or SCAN requests in the shown client code; payload size is determined by the assembled string components: request type (\"GET\"/\"SCAN\"), key prefix and numeric part, decimal `scanLimit` (for SCAN), and textual `reqID`, with a typical construction buffer capacity of 256 bytes.",
+            "code_snippets": [
+              {
+                "path": "cmd/workload_client/main.go",
+                "snippet": "var (\n\t\ttargetRate  = flag.Float64(\"rate\", 1000, \"target send rate (requests per second)\")\n\t\tgetFrac     = flag.Float64(\"get-frac\", 0.8, \"fraction of GET requests; remainder are SCAN\")\n\t\tscanLimit   = flag.Int(\"scan-limit\", 500, \"number of keys per SCAN request\")\n\t\tkeyPrefix   = flag.String(\"key-prefix\", \"key\", \"prefix used when generating keys\")\n\t\tkeySpace    = flag.Int(\"key-space\", 100000, \"upper bound (exclusive) for generated key numbers\")\n\t)\n\t...\n\tbuf := make([]byte, 0, 256)\n\t...\n\tpayload := buildPayload(rng, buf, reqType, reqID, *keyPrefix, *keySpace, *scanLimit)"
+              },
+              {
+                "path": "cmd/workload_client/main.go",
+                "snippet": "func buildPayload(rng *rand.Rand, buf []byte, reqType, reqID, prefix string, keySpace, scanLimit int) []byte {\n\tbuf = buf[:0]\n\tbuf = append(buf, reqType...)\n\tbuf = append(buf, ' ')\n\tkeyIdx := rng.Intn(keySpace)\n\tbuf = appendKey(buf, prefix, keyIdx)\n\tif reqType == \"SCAN\" {\n\t\tbuf = append(buf, ' ')\n\t\tbuf = strconv.AppendInt(buf, int64(scanLimit), 10)\n\t}\n\tbuf = append(buf, ' ')\n\tbuf = append(buf, reqID...)\n\treturn buf\n}"
+              },
+              {
+                "path": "cmd/workload_client/main.go",
+                "snippet": "func appendKey(buf []byte, prefix string, keyIdx int) []byte {\n\tbuf = append(buf, prefix...)\n\tif keyIdx < 100000000 {\n\t\tstart := len(buf)\n\t\tbuf = append(buf, '0', '0', '0', '0', '0', '0', '0', '0')\n\t\tfor i := 7; i >= 0; i-- {\n\t\t\tbuf[start+i] = byte('0' + keyIdx%10)\n\t\t\tkeyIdx /= 10\n\t\t}\n\t\treturn buf\n\t}\n\treturn strconv.AppendInt(buf, int64(keyIdx), 10)\n}"
+              }
+            ]
+          }
+        },
+        {
+          "question": "In the code where reuseport worker sockets are created and bound (file and function), how many sockets are created by default, and is this number configurable at runtime or build time?",
+          "answer": {
+            "answer": "The reuseport worker sockets are created and bound in the function `openWorker` in `internal/server/server.go`. The provided code only shows how a single UDP socket is opened per worker invocation, but does not show how many times `openWorker` is called or any constant/flag controlling the number of workers. From the available code, there is no default worker count visible, and no indication that the number of reuseport sockets is configurable at either runtime or build time.",
+            "code_snippets": [
+              {
+                "path": "internal/server/server.go",
+                "snippet": "func (s *Server) openWorker(idx int) (*net.UDPConn, int, error) {\n\tattachPolicy := s.policy != nil && s.policy.program != nil && idx == 0\n\tvar attachErr error\n\n\tlc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {\n\t\treturn c.Control(func(fd uintptr) {\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEADDR: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEPORT: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif attachPolicy && attachErr == nil {\n\t\t\t\tif err := s.policy.attach(int(fd)); err != nil {\n\t\t\t\t\tattachErr = err\n\t\t\t\t}\n\t\t\t}\n\t\t})\n\t}}\n\n\tpc, err := lc.ListenPacket(context.Background(), \"udp\", s.cfg.ListenAddr)\n\tif err != nil {\n\t\treturn nil, -1, err\n\t}\n\tif attachErr != nil {\n\t\tpc.Close()\n\t\treturn nil, -1, attachErr\n\t}\n\n\tudpConn := pc.(*net.UDPConn)\n\tvar fd int\n\traw, err := udpConn.SyscallConn()\n\tif err != nil {\n\t\tudpConn.Close()\n\t\treturn nil, -1, err\n\t}\n\tif err := raw.Control(func(value uintptr) {\n\t\tfd = int(value)\n\t}); err != nil {\n\t\tudpConn.Close()\n\t\treturn nil, -1, err\n\t}\n\n\treturn udpConn, fd, nil\n}"
+              },
+              {
+                "path": "internal/server/server.go",
+                "snippet": "func (s *Server) spawnWorker(ctx context.Context, idx int, conn *net.UDPConn) {\n\ts.wg.Add(1)\n\tgo func() {\n\t\tdefer s.wg.Done()\n\t\tbuf := make([]byte, 16*1024)\n\n\t\tfor {\n\t\t\tn, addr, err := conn.ReadFromUDP(buf)\n\t\t\tif err != nil {\n\t\t\t\tselect {\n\t\t\t\tcase <-ctx.Done():\n\t\t\t\t\treturn\n\t\t\t\tdefault:\n\t\t\t\t}\n\t\t\t\tif errors.Is(err, net.ErrClosed) {\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\ts.logger.Printf(\"worker=%d read error: %v\", idx, err)\n\t\t\t\tcontinue\n\t\t\t}\n\n\t\t\tresponse := s.handleRequest(idx, buf[:n])\n\t\t\tif response == nil {\n\t\t\t\tcontinue\n\t\t\t}\n\n\t\t\tif _, err := conn.WriteToUDP(response, addr); err != nil {\n\t\t\t\tif errors.Is(err, net.ErrClosed) {\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\ts.logger.Printf(\"worker=%d write error: %v\", idx, err)\n\t\t\t}\n\t\t}\n\t}()\n}"
+              }
+            ]
+          }
+        },
+        {
+          "question": "Where is the pebble_agent_state BPF map defined (C and/or Go binding), and what is the full layout of its key and value types, including any existing fields that the eBPF program is expected to maintain or that userspace reads?",
+          "answer": {
+            "answer": "The `pebble_agent_state` BPF map is exposed to Go code via the `PebbleAgentState` field on the generated `AgentSelectorObjects` struct in the `pebbleserver/internal/ebpfutil` package. In the server, it is accessed in `internal/server/ebpf.go` inside `loadAgent`, where it is treated as a map keyed by a single `uint32` (key 0) whose value is an `ebpfutil.AgentSelectorAgentState` struct.\n\nFrom the Go bindings, the layout is:\n- Map name: `pebble_agent_state`\n- Key type: `uint32`\n- Value type: `ebpfutil.AgentSelectorAgentState`\n\nWithin this value type, the field that userspace currently sets and that the eBPF program is expected to read/maintain is:\n- `Active uint32` \u2014 the number of active workers, written by userspace.\n\nNo other fields are referenced or used in the shown Go code; if additional fields exist in the C definition of the map value, they are not currently used here. The eBPF program is expected to look up key `0` in `pebble_agent_state` and read the `Active` field from the value.",
+            "code_snippets": [
+              {
+                "path": "internal/server/ebpf.go",
+                "snippet": "var objs ebpfutil.AgentSelectorObjects\nopts := &ebpf.CollectionOptions{\n    Maps: ebpf.MapOptions{PinPath: pinDir},\n}\nif err := ebpfutil.LoadAgentSelectorObjects(&objs, opts); err != nil {\n    return nil, fmt.Errorf(\"load agent objects: %w\", err)\n}\n\nvar key uint32 = 0\nstate := ebpfutil.AgentSelectorAgentState{\n    Active: uint32(workers),\n}\nif objs.PebbleAgentState != nil {\n    if err := objs.PebbleAgentState.Update(&key, &state, ebpf.UpdateAny); err != nil {\n        objs.Close()\n        return nil, fmt.Errorf(\"configure agent state: %w\", err)\n    }\n}"
+              }
+            ]
+          }
+        },
+        {
+          "question": "Search the server codebase for any per-client or per-flow state keyed by UDP source address or 5-tuple (for example maps or caches indexed by addr/port); list the locations and describe whether this state is worker-local or shared across workers.",
+          "answer": {
+            "answer": [
+              "No per-client or per-flow state keyed by UDP source address or 5\u2011tuple is present in the visible portions of the codebase.",
+              "On the server side, worker sockets are opened via a helper that only configures socket options (SO_REUSEADDR/SO_REUSEPORT) and optionally attaches a policy; it does not create or access any maps, caches, or other data structures indexed by client address or 5\u2011tuple, nor does it record per-client information alongside the returned file descriptor.",
+              "On the client side, each send worker maintains only a per-worker random number generator, a local buffer, and uses a shared atomic sequence counter and shared atomic counters for request statistics. Requests are all sent from the same local UDP endpoint created by net.DialUDP per worker; no maps or other state keyed by remote or local address/port are used.",
+              "From what is visible, all state related to requests is either per-worker (local RNG, buffer, connection handle) or shared across all workers via atomics (sequence and per\u2011type sent counters), and none of it is indexed by client/flow identity such as UDP source address or 5\u2011tuple."
+            ],
+            "code_snippets": [
+              {
+                "path": "internal/server/server.go",
+                "snippet": "func (s *Server) openWorker(idx int) (*net.UDPConn, int, error) {\n\tattachPolicy := s.policy != nil && s.policy.program != nil && idx == 0\n\tvar attachErr error\n\n\tlc := net.ListenConfig{Control: func(network, address string, c syscall.RawConn) error {\n\t\treturn c.Control(func(fd uintptr) {\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEADDR: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif err := unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1); err != nil && attachErr == nil {\n\t\t\t\tattachErr = fmt.Errorf(\"SO_REUSEPORT: %w\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif attachPolicy && attachErr == nil {\n\t\t\t\tif err := s.policy.attach(int(fd)); err != nil {\n\t\t\t\t\tattachErr = err\n\t\t\t\t}\n\t\t\t}\n\t\t})\n\t}}\n\n\tpc, err := lc.ListenPacket(context.Background(), \"udp\", s.cfg.ListenAddr)\n\tif err != nil {\n\t\treturn nil, -1, err\n\t}\n\tif attachErr != nil {\n\t\tpc.Close()\n\t\treturn nil, -1, attachErr\n\t}\n\n\tudpConn := pc.(*net.UDPConn)\n\tvar fd int\n\traw, err := udpConn.SyscallConn()\n\tif err != nil {\n\t\tudpConn.Close()\n\t\treturn nil, -1, err\n\t}\n\tif err := raw.Control(func(value uintptr) {\n\t\tfd = int(value)\n\t}); err != nil {\n\t\tudpConn.Close()\n\t\treturn nil, -1, err\n\t}\n\n\treturn udpConn, fd, nil\n}\n"
+              },
+              {
+                "path": "cmd/workload_client/main.go",
+                "snippet": "var (\n\t\tserverAddr  = flag.String(\"server\", \"127.0.0.1:9000\", \"UDP server address\")\n\t\tduration    = flag.Duration(\"duration\", 30*time.Second, \"duration of the workload\")\n\t\ttargetRate  = flag.Float64(\"rate\", 1000, \"target send rate (requests per second)\")\n\t\tgetFrac     = flag.Float64(\"get-frac\", 0.8, \"fraction of GET requests; remainder are SCAN\")\n\t\tscanLimit   = flag.Int(\"scan-limit\", 500, \"number of keys per SCAN request\")\n\t\tkeyPrefix   = flag.String(\"key-prefix\", \"key\", \"prefix used when generating keys\")\n\t\tkeySpace    = flag.Int(\"key-space\", 100000, \"upper bound (exclusive) for generated key numbers\")\n\t\tlogPath     = flag.String(\"log\", \"logs/client.log\", \"path to log file\")\n\t\tsendWorkers = flag.Int(\"send-workers\", 1, \"number of concurrent send workers\")\n\t)\n\tflag.Parse()\n\n\tudpAddr, err := net.ResolveUDPAddr(\"udp\", *serverAddr)\n"
+              },
+              {
+                "path": "cmd/workload_client/main.go",
+                "snippet": "conn, err := net.DialUDP(\"udp\", nil, udpAddr)\n\t\tif err != nil {\n\t\t\tlogger.Fatalf(\"dial udp worker=%d: %v\", i, err)\n\t\t}\n\t\tdefer conn.Close()\n\n\t\tseed := time.Now().UnixNano() + int64(i)\n\t\trng := rand.New(rand.NewSource(seed))\n\n\t\tworkerID := i\n\n\t\tsendWG.Add(1)\n\t\tgo func(workerID int, conn *net.UDPConn, rng *rand.Rand) {\n\t\t\tdefer sendWG.Done()\n\t\t\tbuf := make([]byte, 0, 256)\n\t\t\tfor {\n\t\t\t\tif err := limiter.Wait(ctx); err != nil {\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t\tcurrSeq := atomic.AddUint64(&seq, 1) - 1\n\t\t\t\tisGet := true\n\t\t\t\treqType := \"GET\"\n\t\t\t\tif rng.Float64() > *getFrac {\n\t\t\t\t\treqType = \"SCAN\"\n\t\t\t\t\tisGet = false\n\t\t\t\t}\n\t\t\t\t// Capture timestamp, build payload, and send immediately\n\t\t\t\treqID := makeReqID(time.Now().UnixNano(), currSeq, isGet)\n\t\t\t\tpayload := buildPayload(rng, buf, reqType, reqID, *keyPrefix, *keySpace, *scanLimit)\n\t\t\t\tif _, err := conn.Write(payload); err != nil {\n\t\t\t\t\tlogger.Printf(\"write error (worker=%d): %v\", workerID, err)\n\t\t\t\t\tbuf = payload[:0]\n\t\t\t\t\tcontinue\n\t\t\t\t}\n\t\t\t\tatomic.AddInt64(&sentTotal, 1)\n\t\t\t\tif isGet {\n\t\t\t\t\tatomic.AddInt64(&sentGet, 1)\n\t\t\t\t} else {\n\t\t\t\t\tatomic.AddInt64(&sentScan, 1)\n\t\t\t\t}\n\t\t\t\tbuf = payload[:0]\n\t\t\t}\n\t\t}(workerID, conn, rng)\n"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "iteration": 1,
+      "idea_payload": {
+        "design_doc": {
+          "goals": [
+            "Use all active SO_REUSEPORT workers even when the client uses only a small, fixed set of UDP flows, eliminating the 4-of-6 worker hot-spot behavior and associated packet drops.",
+            "Isolate long SCAN requests from short GET requests at the socket-queue level so SCANs cannot cause head-of-line blocking for GETs.",
+            "Keep the selector self-contained in eBPF, using only the existing AgentUDPSelector program and the pebble_agent_state map (Active field), with no new maps or userspace configuration.",
+            "Maintain or improve sustainable GET throughput and p99 latency at \u2265100k RPS, while keeping SCAN throughput stable and preventing SCAN overload from destabilizing the server."
+          ],
+          "evidence": [
+            "The current selector uses a pure flow-hash modulo Active workers; with the workload client\u2019s small set of UDP flows, this consistently concentrates traffic on only ~4 of 6 reuseport sockets, leaving 2 workers idle and effectively capping capacity at the 4 busy workers.",
+            "Perf logs show that at 50\u201360k RPS the effective 4-worker capacity is sufficient (low p99, no missing responses), but at \u226580k RPS those 4 workers saturate, their socket queues fill, UDP drops occur, and queuing reaches multi-second scales despite constant per-request busy-wait costs.",
+            "Server-side request parsing (parseRequest in internal/server/handler.go) identifies GET vs SCAN solely by inspecting the first ASCII token of the UDP payload (\"GET\" or \"SCAN\"), not by payload size; both request types are short ASCII lines with overlapping length ranges, so classification by payload length alone would be brittle.",
+            "The workload client builds GET as \"GET <key> <reqID>\" and SCAN as \"SCAN <key> <scanLimit> <reqID>\", with typical payloads on the order of a few tens of bytes; both are far smaller than the 16 KiB receive buffer, reinforcing that length-based separation is not reliable.",
+            "The pebble_agent_state map is keyed by a single uint32 (0) whose value type AgentSelectorAgentState currently exposes an Active uint32 field used to convey the worker count; no other fields are used by userspace.",
+            "A code search shows no per-client or per-flow state keyed by UDP source address or 5-tuple on either the server or client side, so removing 5-tuple affinity in the selector does not conflict with existing stateful assumptions.",
+            "The workload mix is approximately 99.5% GET (short, ~10\u00b5s busy-wait) and 0.5% SCAN (long, ~2ms busy-wait); when GET and SCAN share a worker/socket queue, rare SCANs can induce significant head-of-line blocking for many GETs, amplifying GET tail latency far beyond their own service time."
+          ],
+          "architecture": [
+            "Replace pure flow-hash selection with per-packet pseudo-random load balancing: for each incoming UDP datagram, derive a 32-bit pseudo-random value by combining the sk_reuseport_md.hash with a changing source such as ktime or, if allowed for AgentUDPSelector, a kernel RNG helper; then normalise this value by pebble_agent_state.Active so that, over time, even a small set of client flows distributes uniformly across all active reuseport slots.",
+            "Within the eBPF program, parse the IP and UDP headers from sk_reuseport_md.data to locate the start of the UDP payload, then read only the first few payload bytes and classify the command by its ASCII prefix, treating payloads starting with \"GET \" as GET and those starting with \"SCAN \" as SCAN (assuming no leading whitespace and upper-case commands as emitted by the benchmark client), and treating any other prefix as a short request equivalent to GET for routing purposes.",
+            "Logically partition the reuseport indices into GET and SCAN pools based solely on the Active worker count from pebble_agent_state: for N=Active workers, reserve a small tail segment of indices [N-scan_slots, N) as the SCAN pool (e.g., scan_slots computed as a simple function like max(1, N/8) but never exceeding N/2), and treat the remaining [0, N-scan_slots) indices as the GET pool, without requiring any userspace awareness of this partitioning.",
+            "For each packet, after classifying it as GET-like or SCAN, map the pseudo-random value uniformly into the appropriate pool: for GET, choose an index in [0, N-scan_slots); for SCAN, choose an index in [N-scan_slots, N); then select that reuseport slot via the existing AgentUDPSelector mechanism, ensuring that long SCANs are confined to a small subset of workers and cannot cause head-of-line blocking for the large majority of short GET traffic.",
+            "Keep eBPF state minimal: perform a single pebble_agent_state lookup to read Active, avoid any per-packet map updates or counters, and implement only the minimal header/payload parsing and branching necessary for command classification and pool selection to reduce verifier complexity and runtime overhead."
+          ],
+          "risks": [
+            "The AgentUDPSelector (sk_reuseport) program must be able to safely parse IP/UDP headers and read the first few bytes of the UDP payload via sk_reuseport_md.data/data_end; although this is typical for this program type, it should be verified against the existing BPF code and kernel version.",
+            "The design assumes the benchmark client continues to emit upper-case \"GET\" and \"SCAN\" without leading whitespace; if clients later send different casing or prefixes, SCAN traffic could be misclassified into the GET pool, reintroducing head-of-line blocking, or vice versa.",
+            "The static heuristic for choosing scan_slots from Active (e.g., 1 worker when N is small, roughly N/8 otherwise) is tuned to the current workload (~0.5% SCAN with 2ms service time); if SCAN rate or cost increases, a too-small SCAN pool could saturate and cause high SCAN latency, while a too-large pool would waste capacity and slightly reduce maximum GET throughput.",
+            "Using ktime or a RNG helper to break flow affinity makes worker selection non-sticky for a given client or key; this is compatible with the current stateless server design but would conflict with any future features that rely on per-client affinity at the worker level.",
+            "The added work in eBPF (header parsing and a small amount of payload inspection and branching) introduces extra cycles per packet; although kept minimal, this could very slightly reduce maximum throughput and should be measured against the gains from better load distribution and SCAN/GET isolation."
+          ]
+        },
+        "questions": []
+      },
+      "rag_answers": []
+    },
+    {
+      "iteration": 2,
+      "idea_payload": {
+        "design_doc": {
+          "goals": [
+            "Use all active SO_REUSEPORT workers even when the client uses only a small, fixed set of UDP flows, eliminating the 4-of-6 worker hot-spot behavior and associated packet drops.",
+            "Isolate long SCAN requests from short GET requests at the socket-queue level so SCANs cannot cause head-of-line blocking for GETs.",
+            "Keep the selector self-contained in eBPF, using only the existing AgentUDPSelector program and the pebble_agent_state map (Active field), with no new maps or userspace configuration.",
+            "Maintain or improve sustainable GET throughput and p99 latency at and above 100k RPS, while keeping SCAN throughput stable and preventing SCAN overload from destabilizing the server."
+          ],
+          "evidence": [
+            "The current selector uses a pure flow-hash modulo Active workers; with the workload client\u2019s small set of UDP flows (one DialUDP per send worker), this concentrates traffic on only about 4 of 6 reuseport sockets per run, leaving 2 workers idle and effectively capping capacity at the 4 busy workers.",
+            "Perf logs show that at 50\u201360k RPS the effective 4-worker capacity is sufficient (low p99, no missing responses), but at \u226580k RPS those 4 workers saturate, their socket queues fill, UDP drops occur, and queuing reaches multi-second scales despite constant per-request busy-wait costs.",
+            "Server-side request parsing (parseRequest in internal/server/handler.go) classifies commands purely by the first ASCII token of the UDP payload (\"GET\" or \"SCAN\"), not by payload length; both request types are short ASCII lines with overlapping and small length ranges, so length-based classification inside eBPF would be unreliable.",
+            "The workload client builds GET as \"GET <key> <reqID>\" and SCAN as \"SCAN <key> <scanLimit> <reqID>\" using a small text buffer; typical payloads are on the order of a few tens of bytes and both are far below the 16 KiB receive buffer, reinforcing that payload size alone cannot distinguish them.",
+            "The pebble_agent_state map is keyed by a single uint32 (0); its value type AgentSelectorAgentState has an Active uint32 field that userspace sets to the worker count. No other fields are used in Go, so the eBPF program effectively depends only on Active for selecting among sockets.",
+            "A code search shows no per-client or per-flow state keyed by UDP source address or 5-tuple in server or client code; all request handling is stateless at the UDP level, so removing 5-tuple affinity in the selector is safe for the current design.",
+            "The workload mix is approximately 99.5% GET (short, ~10\u00b5s busy-wait) and 0.5% SCAN (long, ~2ms busy-wait). Once worker-level load is balanced, rare long SCANs that share a worker and socket queue with many GETs can still cause significant head-of-line blocking and inflate GET tail latency far beyond GET service time."
+          ],
+          "architecture": [
+            "Derive a per-packet selection key by combining the existing sk_reuseport_md.hash (5-tuple hash) with a very cheap hash of the first few payload bytes, so that packets within a single UDP flow (same 5-tuple) still produce different selection keys. This breaks the current correlation between a small set of flows and a small subset of slots, yielding an approximately uniform distribution across all Active workers over time without using any randomness helpers.",
+            "Within the AgentUDPSelector program, parse from sk_reuseport_md.data/data_end just enough of the network headers to reliably locate the start of the UDP payload for IPv4/UDP (and, if straightforward, IPv6/UDP). Then read the first 4\u20135 payload bytes and classify the command by its ASCII prefix: treat payloads starting with \"GET \" as GET and those starting with \"SCAN \" as SCAN, assuming the benchmark client\u2019s current format (no leading whitespace, upper-case commands). Any other prefix is treated as a short, GET-like request for routing purposes.",
+            "Use the Active value from pebble_agent_state to define two logical index pools over the reuseport group: for N = Active workers, choose a small integer scan_slots entirely inside the BPF program (for example, scan_slots = 1 when N \u2264 3, scan_slots = 2 when 4 \u2264 N \u2264 8, and scan_slots = N/4 for larger N, always clamped to [1, N/2]). Reserve indices [N - scan_slots, N) as the SCAN pool and [0, N - scan_slots) as the GET pool, with no userspace awareness or configuration of this split.",
+            "For each packet, after classifying it as GET-like or SCAN, map the combined selection key into the appropriate pool: for GET, compute an index in [0, N - scan_slots) by taking the selection key modulo (N - scan_slots); for SCAN, compute an index in [N - scan_slots, N) by taking the selection key modulo scan_slots and adding (N - scan_slots). Pass this final index to AgentUDPSelector so that long SCANs are confined to a small, dedicated subset of workers while GETs are spread across the remaining workers.",
+            "Keep the eBPF implementation minimal: perform a single read of pebble_agent_state (key 0) to get Active; do not write to the map or maintain per-slot counters; limit header parsing and payload inspection to the minimum bounds-checked operations needed for command prefix classification and a lightweight hash. This reduces verifier complexity and runtime overhead while still addressing both hash-collision and head-of-line blocking issues."
+          ],
+          "risks": [
+            "The sk_reuseport_md.data pointer layout for UDP sockets (exact starting offset at IP vs L2) must match the assumptions used to locate the UDP payload. If the program misidentifies the start of the payload (e.g., for IPv6 or unusual encapsulation), command classification could fail and fall back to GET-like handling, reintroducing SCAN/GET interference. This needs to be validated against the existing BPF program and target kernel.",
+            "The classification logic assumes the client sends upper-case \"GET\" and \"SCAN\" as the first token with no leading whitespace. If future clients change casing, add prefixes, or introduce new commands, SCAN requests might be misrouted into the GET pool, allowing head-of-line blocking again, or non-SCAN traffic could be sent to the SCAN pool, wasting capacity.",
+            "The chosen static heuristic for scan_slots (e.g., 1\u20132 workers for small N, ~N/4 for larger N) is tuned to the current mix where SCANs are ~0.5% of requests but comparable in total CPU cost to GETs. If SCAN rate or service time changes significantly, the SCAN pool could be undersized (high SCAN latency) or oversized (underutilized workers and slightly lower maximum GET throughput).",
+            "Eliminating 5-tuple stickiness and redistributing packets based on payload content and a simple hash means a single client\u2019s requests may be processed by different workers over time. This is compatible with the current stateless handler, but would conflict with any future features that rely on per-client or per-key affinity to a worker (for example, per-worker caches).",
+            "Although the additional eBPF work (header parsing, a few payload bytes, and simple integer arithmetic) is intentionally minimal, it does add cycles to every packet. The expectation is that the gains from full worker utilization and SCAN/GET isolation will far outweigh this cost, but this should still be validated with end-to-end benchmarks."
+          ]
+        },
+        "questions": []
+      },
+      "rag_answers": []
+    }
+  ]
+}

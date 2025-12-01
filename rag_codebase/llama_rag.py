@@ -63,13 +63,13 @@ LANGUAGE_CONFIGS: list[LanguageIngestionConfig] = [
         ],
         extensions=(".go",),
     ),
-    LanguageIngestionConfig(
-        language="c",
-        directories=[
-            REPO_ROOT / "ebpf",
-        ],
-        extensions=(".c", ".h"),
-    ),
+    # LanguageIngestionConfig(
+    #     language="c",
+    #     directories=[
+    #         REPO_ROOT / "ebpf",
+    #     ],
+    #     extensions=(".c", ".h"),
+    # ),
     LanguageIngestionConfig(
         language="python",
         directories=[
@@ -103,7 +103,7 @@ def configure_llamaindex(api_key: str) -> None:
     Args:
         api_key: OpenAI API key used for the chat/model endpoints.
     """
-    llm_kwargs = {"model": "gpt-5.1", "api_key": api_key, "temperature": 0.7}
+    llm_kwargs = {"model": "gpt-5.1", "api_key": api_key}
     try:
         Settings.llm = OpenAI(system_prompt=RAG_SYSTEM_PROMPT, **llm_kwargs)
     except TypeError:
@@ -360,7 +360,7 @@ def build_index(
     index.storage_context.persist(persist_dir=str(persist_dir))
 
 
-def query_index(persist_dir: Path, question: str, top_k: int = 3) -> str:
+def query_index(persist_dir: Path, question: str, top_k: int = 6) -> str:
     """
     Load a persisted index and answer a natural-language question.
 
@@ -426,7 +426,7 @@ def parse_args() -> argparse.Namespace:
     query_parser.add_argument(
         "--top-k",
         type=int,
-        default=3,
+        default=6,
         help="How many similar chunks to retrieve when answering.",
     )
     return parser.parse_args()

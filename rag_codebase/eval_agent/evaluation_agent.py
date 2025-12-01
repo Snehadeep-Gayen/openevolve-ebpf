@@ -275,9 +275,7 @@ def answer_questions_with_rag(raw_questions: Any, max_workers: int = 5) -> list[
 
 if __name__ == "__main__":
     base_dir = os.path.dirname(__file__)
-    crafted_path = os.path.join(
-        base_dir, "exp-20251113-162706", "evolve_debug", "codex_payload_crafted.json"
-    )
+    crafted_path = os.path.join(base_dir, "payloads", "codex_payload_crafted.json")
 
     with open(crafted_path, "r", encoding="utf-8") as crafted_file:
         crafted_text = crafted_file.read()
@@ -299,7 +297,7 @@ if __name__ == "__main__":
     iteration_records: list[Dict[str, Any]] = []
     iteration_count = 3
     question_iterations = max(iteration_count - 1, 1)
-    test_path = os.path.join(base_dir, "test.json")
+    test_path = os.path.join(base_dir, "eval_output.json")
 
     for iteration_index in range(question_iterations):
         response = make_llm_call(
