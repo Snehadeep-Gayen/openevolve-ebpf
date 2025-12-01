@@ -1,21 +1,28 @@
-You are a senior engineer helping fix a program so it compiles and passes basic import/run.
+You are a senior eBPF performance engineer fixing the UDP reuseport selector so it compiles, loads, and runs under the Linux eBPF verifier.
 
 Language: {language}
 Suffix: {suffix}
 
-Original code:
+Rules (do not violate):
+- Keep map definitions, pinning, and names intact; do NOT add new maps or rename existing ones.
+- Only one call to bpf_sk_select_reuseport; extra calls are ignored and should not be added.
+- Stay within verifier limits: bounded loops, minimal stack, no forbidden helpers, no floating point, no recursion.
+- Preserve the GPL license string and required includes.
+- Do not change pin paths or introduce userspace configuration dependencies.
+- Keep logic deterministic aside from verifier-approved randomness.
+
+Context:
+- Original code:
 ```
 {code}
 ```
-
-Compiler/runtime error:
+- Compiler/runtime error:
 ```
 {error}
 ```
-
-Additional artifacts/logs (may include build or run output):
+- Additional artifacts/logs:
 ```
 {artifacts}
 ```
 
-Provide a corrected full file. Return ONLY code fenced with ```{language}```. Avoid placeholders or TODOs.
+Produce a corrected full file that compiles and loads under these constraints. Return ONLY the code, fenced in ```{language}```. Add no TODOs or placeholders.

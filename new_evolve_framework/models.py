@@ -67,6 +67,11 @@ class IdeaNode:
     id: str
     idea_payload: Optional[Dict[str, Any]]
     idea_summary: str
+    parent_id: Optional[str] = None
+    eval_summary: Optional[str] = None
+    eval_hypothesis: Optional[str] = None
+    eval_score: Optional[float] = None
+    eval_output_path: Optional[str] = None
     programs: List[str] = field(default_factory=list)
     best_program_id: Optional[str] = None
     best_score: Optional[float] = None
@@ -81,12 +86,14 @@ class IdeaNode:
         *,
         idea_payload: Optional[Dict[str, Any]],
         idea_summary: str,
+        parent_id: Optional[str] = None,
         artifacts_dir: Optional[Path] = None,
     ) -> "IdeaNode":
         return cls(
             id=_gen_id(),
             idea_payload=idea_payload,
             idea_summary=idea_summary,
+            parent_id=parent_id,
             artifacts_dir=str(artifacts_dir) if artifacts_dir else None,
         )
 

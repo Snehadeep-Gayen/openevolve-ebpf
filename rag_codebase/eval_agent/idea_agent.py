@@ -33,6 +33,13 @@ PROMPT_KEYS = ("idea_agent_prompt", "eval_agent_prompt", "prompt", "system_promp
 QUERY_KEYS = ("queries", "questions", "rag_queries")
 
 
+def _supports_reasoning(model_name: str) -> bool:
+    if not isinstance(model_name, str):
+        return False
+    lowered = model_name.lower()
+    return lowered.startswith(("o3", "o1", "gpt-5"))
+
+
 def _load_prompt_payload(prompt_path: Optional[Path] = None) -> str:
     """Return the textual system prompt stored in *prompt_path*."""
 
@@ -291,6 +298,8 @@ def run_idea_refinement(
     iteration_count: int = 2,
     prompt_payload_path: Optional[Path] = None,
     model: str = DEFAULT_MODEL,
+    reasoning_effort: Optional[str] = DEFAULT_REASONING,
+    temperature: Optional[float] = None,
 ) -> list[Dict[str, Any]]:
     """Iteratively refine a program idea using LLM + RAG feedback."""
 
@@ -310,16 +319,23 @@ def run_idea_refinement(
     iteration_records: list[Dict[str, Any]] = []
     collected_snippets: list[Dict[str, str]] = []
     snippet_keys: set[tuple[str, str]] = set()
+    supports_reasoning = (
+        isinstance(reasoning_effort, str)
+        and reasoning_effort.lower() != "none"
+        and _supports_reasoning(model)
+    )
 
     for iteration_index in range(max_iterations):
         print(f"[idea] Iteration {iteration_index + 1}/{max_iterations}")
-        response = make_llm_call(
-            {
-                "model": model,
-                "messages": message_history,
-                "reasoning_effort": DEFAULT_REASONING,
-            }
-        )
+        payload = {
+            "model": model,
+            "messages": message_history,
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if supports_reasoning:
+            payload["reasoning_effort"] = reasoning_effort
+        response = make_llm_call(payload)
         response_json = response.model_dump()
         assistant_message = response.choices[0].message
         assistant_text = _message_content_to_text(assistant_message.content)
