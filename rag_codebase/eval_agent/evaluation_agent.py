@@ -189,6 +189,17 @@ def _literal(value: Optional[str]) -> Optional[LiteralStr]:
     return LiteralStr(value) if value is not None else None
 
 
+def _literalize(obj: Any) -> Any:
+    """Recursively wrap strings so YAML renders them as literal blocks."""
+    if isinstance(obj, str):
+        return LiteralStr(obj)
+    if isinstance(obj, list):
+        return [_literalize(v) for v in obj]
+    if isinstance(obj, dict):
+        return {k: _literalize(v) for k, v in obj.items()}
+    return obj
+
+
 def _write_outputs(destination: Union[str, Path], iteration_records: list[Dict[str, Any]]) -> None:
     """Persist the current iteration records to disk for inspection (JSON + YAML for readability)."""
 
@@ -201,19 +212,7 @@ def _write_outputs(destination: Union[str, Path], iteration_records: list[Dict[s
         json.dump(payload, outfile, indent=2)
 
     # YAML (readable, with literal blocks for summaries/hypotheses)
-    yaml_payload = []
-    for entry in payload:
-        iters = []
-        for record in entry.get("iterations", []):
-            rec_copy = dict(record)
-            if isinstance(rec_copy.get("Summary"), str):
-                rec_copy["Summary"] = _literal(rec_copy["Summary"])
-            hypothesis = rec_copy.get("hypothesis")
-            if isinstance(hypothesis, dict) and isinstance(hypothesis.get("text"), str):
-                rec_copy["hypothesis"] = dict(hypothesis)
-                rec_copy["hypothesis"]["text"] = _literal(hypothesis["text"])
-            iters.append(rec_copy)
-        yaml_payload.append({"iterations": iters})
+    yaml_payload = _literalize(payload)
 
     yaml_path = destination_path.with_suffix(".yaml")
     yaml_path.write_text(

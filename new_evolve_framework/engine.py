@@ -62,6 +62,17 @@ def _literal(value: Optional[str]) -> Optional[LiteralStr]:
     return LiteralStr(value) if value is not None else None
 
 
+def _literalize(obj: Any) -> Any:
+    """Recursively wrap strings as LiteralStr for block-style YAML output."""
+    if isinstance(obj, str):
+        return LiteralStr(obj)
+    if isinstance(obj, list):
+        return [_literalize(v) for v in obj]
+    if isinstance(obj, dict):
+        return {k: _literalize(v) for k, v in obj.items()}
+    return obj
+
+
 def _supports_reasoning(model_name: str) -> bool:
     """Return True if model likely supports reasoning_effort."""
 
@@ -69,6 +80,18 @@ def _supports_reasoning(model_name: str) -> bool:
         return False
     lowered = model_name.lower()
     return lowered.startswith(("o3", "o1", "gpt-5"))
+
+
+def _supports_temperature(model_name: str) -> bool:
+    """Return True if model likely supports custom temperature."""
+
+    if not model_name:
+        return False
+    lowered = model_name.lower()
+    # Known non-temperature models: some o3 variants require default only; gpt-5.1 treated similarly here
+    if lowered.startswith("o3") or lowered.startswith("gpt-5.1"):
+        return False
+    return True
 
 
 def _read_text(path: Path) -> str:
@@ -141,8 +164,8 @@ class IdeaProgramEngine:
         self.results_root = Path(results_root)
         self.results_root.mkdir(parents=True, exist_ok=True)
 
-        suffix = self.initial_program_path.suffix or ".py"
-        self.language = self.config.language or "python"
+        suffix = self.initial_program_path.suffix or ".c"
+        self.language = self.config.language or "c"
 
         # Evaluator setup
         llm_eval_ensemble = LLMEnsemble(self.config.llm.evaluator_models)
@@ -168,7 +191,7 @@ class IdeaProgramEngine:
 
         # Loop config
         self.model = model
-        self.temperature = temperature
+        self.temperature = temperature if _supports_temperature(model) else None
         self.model_supports_reasoning = _supports_reasoning(model)
         self.idea_iterations = idea_iterations
         self.programs_per_idea = programs_per_idea
@@ -201,6 +224,18 @@ class IdeaProgramEngine:
         with programs_path.open("w", encoding="utf-8") as outf:
             for p in new_programs:
                 outf.write(json.dumps(asdict(p)) + "\n")
+                # Also write per-generation program record into its gen directory if available
+                gen_dir = None
+                if isinstance(p.eval_artifacts, dict):
+                    gen_dir = p.eval_artifacts.get("program_generation_dir")
+                if gen_dir:
+                    try:
+                        gen_dir_path = Path(gen_dir)
+                        gen_dir_path.mkdir(parents=True, exist_ok=True)
+                        gen_record_path = gen_dir_path / "program_record.json"
+                        gen_record_path.write_text(json.dumps(asdict(p), indent=2), encoding="utf-8")
+                    except Exception as exc:  # pragma: no cover
+                        logger.warning("Failed to write per-gen program record to %s: %s", gen_dir, exc)
 
         # top-level index for resume
         index_path = self.results_root / "index.yaml"
@@ -283,10 +318,14 @@ class IdeaProgramEngine:
 
         context_dict, context_text = self._build_prompt_context(best_program, eval_context)
         code_summary_block = getattr(self.config, "code_summary", None)
+        runs_text = ""
+        if isinstance(best_program.eval_artifacts, dict) and best_program.eval_artifacts.get("runs"):
+            runs_text = json.dumps(best_program.eval_artifacts.get("runs"), indent=2)
         eval_prompt_text = (
             f"{self.eval_prompt_base_text.rstrip()}\n\n"
-            f"Codebase summary:\n{code_summary_block or 'N/A'}\n\n"
             f"Run context:\n{context_text}\n\n"
+            f"Codebase summary:\n{code_summary_block or 'N/A'}\n\n"
+            f"Run artifacts (runs):\n{runs_text or 'N/A'}\n\n"
             f"Best program code:\n```{self.initial_program_path.suffix or '.py'}\n{best_program.code}\n```"
         )
         eval_payload = {
@@ -296,7 +335,12 @@ class IdeaProgramEngine:
         }
         eval_prompt_path = iteration_dir / "eval_prompt.yaml"
         eval_prompt_path.write_text(
-            yaml.safe_dump(eval_payload, sort_keys=False, width=120, default_flow_style=False),
+            yaml.safe_dump(
+                _literalize(eval_payload),
+                sort_keys=False,
+                width=120,
+                default_flow_style=False,
+            ),
             encoding="utf-8",
         )
         return eval_prompt_path
@@ -313,8 +357,8 @@ class IdeaProgramEngine:
         code_summary_block = getattr(self.config, "code_summary", None)
         idea_prompt_text = (
             f"{self.idea_prompt_base_text.rstrip()}\n\n"
-            f"Codebase summary:\n{code_summary_block or 'N/A'}\n\n"
             f"Run context:\n{context_text}\n\n"
+            f"Codebase summary:\n{code_summary_block or 'N/A'}\n\n"
             f"Best program code:\n```{self.initial_program_path.suffix or '.py'}\n{best_program.code}\n```"
         )
         idea_payload = {
@@ -324,7 +368,12 @@ class IdeaProgramEngine:
         }
         idea_prompt_path = iteration_dir / "idea_prompt.yaml"
         idea_prompt_path.write_text(
-            yaml.safe_dump(idea_payload, sort_keys=False, width=120, default_flow_style=False),
+            yaml.safe_dump(
+                _literalize(idea_payload),
+                sort_keys=False,
+                width=120,
+                default_flow_style=False,
+            ),
             encoding="utf-8",
         )
         return idea_prompt_path
@@ -384,7 +433,7 @@ class IdeaProgramEngine:
                 {"role": "user", "content": user_prompt},
             ],
         }
-        if self.temperature is not None:
+        if self.temperature is not None and _supports_temperature(self.model):
             payload["temperature"] = self.temperature
         if self.model_supports_reasoning:
             payload["reasoning_effort"] = "medium"
@@ -428,11 +477,14 @@ class IdeaProgramEngine:
         payload: Dict[str, Any],
         response_text: str,
         extracted_code: str,
+        gen_dir: Path,
     ) -> None:
-        """Persist the program-generation prompt/response for debugging."""
-        out_dir = iteration_dir / "program_generations"
+        """Persist the program-generation prompt/response and extracted code for debugging."""
+        out_dir = gen_dir
         out_dir.mkdir(parents=True, exist_ok=True)
-        log_path = out_dir / f"gen_{generation_order}.yaml"
+        log_path = out_dir / "gen.yaml"
+        code_path = out_dir / f"program{self.initial_program_path.suffix or '.txt'}"
+
         messages = []
         for msg in payload.get("messages", []):
             if isinstance(msg, dict) and isinstance(msg.get("content"), str):
@@ -450,9 +502,15 @@ class IdeaProgramEngine:
             "extracted_code": _literal(extracted_code),
         }
         log_path.write_text(
-            yaml.safe_dump(log_payload, sort_keys=False, width=120, default_flow_style=False),
+            yaml.safe_dump(
+                _literalize(log_payload),
+                sort_keys=False,
+                width=120,
+                default_flow_style=False,
+            ),
             encoding="utf-8",
         )
+        code_path.write_text(extracted_code, encoding="utf-8")
 
     def _generate_program_code(
         self,
@@ -461,7 +519,7 @@ class IdeaProgramEngine:
         prior_attempts: List[ProgramRecord],
         iteration_dir: Path,
         generation_order: int,
-    ) -> str:
+    ) -> Tuple[str, Path]:
         prompt_template = _read_text(self.program_prompt_path)
         code_summary_block = getattr(self.config, "code_summary", None) or "N/A"
         snippets = node.idea_payload.get("implementation_snippets") if node.idea_payload else []
@@ -520,14 +578,16 @@ class IdeaProgramEngine:
         resp = make_llm_call(payload)
         text = _message_content_to_text(resp.choices[0].message.content)
         code = _extract_code_block(text)
-        self._log_program_generation(iteration_dir, generation_order, payload, text, code)
-        return code
+        out_dir = iteration_dir / "program_generations" / f"gen_{generation_order}"
+        self._log_program_generation(iteration_dir, generation_order, payload, text, code, out_dir)
+        return code, out_dir
 
     async def _evaluate_with_repair(
         self,
         code: str,
         parent_program_id: Optional[str],
         generation_order: int,
+        gen_dir: Optional[Path] = None,
     ) -> ProgramRecord:
         working_code = code
         last_metrics: Optional[Dict[str, Any]] = None
@@ -541,11 +601,14 @@ class IdeaProgramEngine:
                 metrics = await self.evaluator.evaluate_program(working_code, program_id)
                 raw_artifacts = self.evaluator.get_pending_artifacts(program_id) or {}
                 artifacts = self._prepare_artifacts(raw_artifacts)
+                if gen_dir:
+                    artifacts["program_generation_dir"] = str(gen_dir)
                 last_metrics = metrics
                 last_artifacts = artifacts
                 success = metrics.get("run_success") == 1 or metrics.get("success") == 1 or not metrics.get("error")
                 if success:
-                    reasoning = self._program_reasoning()
+                    logger.info("Program generation %s succeeded on attempt %s", generation_order, attempt + 1)
+                    reasoning = None
                     return ProgramRecord.create(
                         status="success",
                         code=working_code,
@@ -554,6 +617,7 @@ class IdeaProgramEngine:
                         eval_artifacts=artifacts,
                         generation_order=generation_order,
                         parent_program_id=parent_program_id,
+                        compile_attempts=attempt + 1,
                     )
                 error_text = (
                     artifacts.get("stderr")
@@ -566,6 +630,7 @@ class IdeaProgramEngine:
                 last_error_text = str(exc)
                 last_artifacts = artifacts
 
+            logger.info("Program generation %s failed attempt %s; entering repair", generation_order, attempt + 1)
             if attempt >= self.compile_fix_attempts:
                 logger.warning("Compile/run failed after retries: %s", last_error_text)
                 fail_metrics = (
@@ -573,6 +638,8 @@ class IdeaProgramEngine:
                     if last_metrics is not None
                     else {"combined_score": float("-inf"), "run_success": 0}
                 )
+                if gen_dir:
+                    last_artifacts["program_generation_dir"] = str(gen_dir)
                 return ProgramRecord.create(
                     status="failed",
                     code=working_code,
@@ -581,6 +648,7 @@ class IdeaProgramEngine:
                     eval_artifacts=last_artifacts,
                     generation_order=generation_order,
                     parent_program_id=parent_program_id,
+                    compile_attempts=attempt + 1,
                 )
 
             working_code = self._fix_compile(working_code, last_error_text, last_artifacts)
@@ -599,7 +667,7 @@ class IdeaProgramEngine:
     def _bootstrap_first_node(self) -> IdeaNode:
         base_code = self.initial_program_path.read_text(encoding="utf-8")
         logger.info("Bootstrapping with initial program at %s", self.initial_program_path)
-        record = asyncio.run(self._evaluate_with_repair(base_code, None, generation_order=0))
+        record = asyncio.run(self._evaluate_with_repair(base_code, None, generation_order=0, gen_dir=None))
         if record is None:
             raise RuntimeError("Unable to evaluate initial program successfully.")
 
@@ -609,9 +677,14 @@ class IdeaProgramEngine:
         node.update_best(record.id, _score_from_metrics(record.metrics))
         self.nodes[node.id] = node
 
-        # Copy any exp-* artifacts from the bootstrap evaluation
+        # Persist bootstrap artifacts similar to an iteration
         bootstrap_dir = self.results_root / "bootstrap"
         bootstrap_dir.mkdir(parents=True, exist_ok=True)
+        # Write programs.jsonl with the bootstrap record
+        programs_path = bootstrap_dir / "programs.jsonl"
+        with programs_path.open("w", encoding="utf-8") as outf:
+            outf.write(json.dumps(asdict(record)) + "\n")
+        # Copy any exp-* artifacts from the bootstrap evaluation
         self._copy_exp_markers([record], bootstrap_dir)
 
         return node
@@ -649,7 +722,7 @@ class IdeaProgramEngine:
             result = run_evaluation_qa_loop(
                 iteration_count=self.eval_iterations,
                 model=self.eval_model,
-                temperature=self.eval_temperature,
+                temperature=self.eval_temperature if _supports_temperature(self.eval_model) else None,
                 prompt_path=prompt_path,
                 output_path=output_path,
                 reasoning_effort=self.eval_reasoning_effort if self.eval_model_supports_reasoning else None,
@@ -743,7 +816,7 @@ class IdeaProgramEngine:
         prior_attempts: List[ProgramRecord] = []
         generated: List[ProgramRecord] = []
         for idx in range(self.programs_per_idea):
-            code = self._generate_program_code(
+            code, gen_dir = self._generate_program_code(
                 node,
                 parent_best,
                 prior_attempts or [parent_best],
@@ -751,7 +824,7 @@ class IdeaProgramEngine:
                 idx,
             )
             record = asyncio.run(
-                self._evaluate_with_repair(code, parent_best.id if parent_best else None, idx)
+                self._evaluate_with_repair(code, parent_best.id if parent_best else None, idx, gen_dir=gen_dir)
             )
             if record:
                 self.programs[record.id] = record
@@ -768,6 +841,8 @@ class IdeaProgramEngine:
                 rec.eval_artifacts.get("raw_debug_path"),
                 rec.eval_artifacts.get("debug_path"),
             ]
+            target_base = rec.eval_artifacts.get("program_generation_dir")
+            target_base_path = Path(target_base) if target_base else iteration_dir
             for dbg in candidate_paths:
                 if not dbg:
                     continue
@@ -783,7 +858,7 @@ class IdeaProgramEngine:
                                 exp_dir = ancestor
                                 break
                     if exp_dir and exp_dir.exists():
-                        target = iteration_dir / exp_dir.name
+                        target = target_base_path / exp_dir.name
                         if exp_dir.is_dir():
                             if not target.exists():
                                 shutil.copytree(exp_dir, target, dirs_exist_ok=True)

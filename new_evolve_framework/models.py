@@ -32,6 +32,7 @@ class ProgramRecord:
     eval_artifacts: Dict[str, Any] = field(default_factory=dict)
     generation_order: int = 0
     parent_program_id: Optional[str] = None
+    compile_attempts: int = 1
     timestamp: float = field(default_factory=_now_ts)
 
     @classmethod
@@ -46,6 +47,7 @@ class ProgramRecord:
         eval_artifacts: Optional[Dict[str, Any]] = None,
         generation_order: int = 0,
         parent_program_id: Optional[str] = None,
+        compile_attempts: int = 1,
     ) -> "ProgramRecord":
         return cls(
             id=_gen_id(),
@@ -57,6 +59,7 @@ class ProgramRecord:
             eval_artifacts=eval_artifacts or {},
             generation_order=generation_order,
             parent_program_id=parent_program_id,
+            compile_attempts=compile_attempts,
         )
 
 

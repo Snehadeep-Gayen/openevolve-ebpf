@@ -69,7 +69,25 @@ def _load_prompt_payload(prompt_path: Optional[Path] = None) -> str:
 
 
 def _write_iteration_outputs(iteration_records: list[Dict[str, Any]]) -> None:
-    """Persist the current iteration state to idea_output.json."""
+    """Persist the current iteration state to idea_output.json and a YAML sidecar."""
+
+    class LiteralStr(str):
+        """YAML literal block string."""
+
+    def _repr_literal_str(dumper, data):
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+
+    yaml.add_representer(LiteralStr, _repr_literal_str)
+    yaml.add_representer(LiteralStr, _repr_literal_str, Dumper=yaml.SafeDumper)
+
+    def _literalize(obj: Any) -> Any:
+        if isinstance(obj, str):
+            return LiteralStr(obj)
+        if isinstance(obj, list):
+            return [_literalize(v) for v in obj]
+        if isinstance(obj, dict):
+            return {k: _literalize(v) for k, v in obj.items()}
+        return obj
 
     simplified: list[Dict[str, Any]] = []
     for record in iteration_records:
@@ -82,7 +100,16 @@ def _write_iteration_outputs(iteration_records: list[Dict[str, Any]]) -> None:
         )
 
     payload = {"iterations": simplified}
+    # JSON for compatibility
     IDEA_OUTPUT_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    # YAML with literal blocks for readability
+    yaml_payload = _literalize(payload)
+    yaml_path = IDEA_OUTPUT_PATH.with_suffix(".yaml")
+    yaml_path.write_text(
+        yaml.safe_dump(yaml_payload, sort_keys=False, width=120, default_flow_style=False),
+        encoding="utf-8",
+    )
 
 
 def _load_final_evaluation_fields(

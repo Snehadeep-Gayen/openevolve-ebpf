@@ -27,11 +27,16 @@ def main() -> None:
         default="gpt-5.1",
         help="Model used for idea gen, program gen/repair, and eval Q&A (unless overridden).",
     )
+    def _parse_optional_float(value: str):
+        if value.lower() in ("none", "null"):
+            return None
+        return float(value)
+
     parser.add_argument(
         "--temperature",
-        type=float,
+        type=_parse_optional_float,
         default=0.8,
-        help="Temperature for program gen/repair/reasoning and eval Q&A (if supported by the model).",
+        help="Temperature for program gen/repair/reasoning and eval Q&A (if supported by the model). Use 'none' to omit.",
     )
     parser.add_argument(
         "--programs-per-idea",
@@ -59,9 +64,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--eval-qa-temperature",
-        type=float,
+        type=_parse_optional_float,
         default=None,
-        help="Temperature to use for the evaluation Q&A loop (defaults to --temperature).",
+        help="Temperature to use for the evaluation Q&A loop (defaults to --temperature). Use 'none' to omit.",
     )
     parser.add_argument(
         "--eval-qa-model",
