@@ -29,6 +29,7 @@ class ProgramRecord:
     metrics: Dict[str, Any]
     error_text: Optional[str] = None
     reasoning: Optional[str] = None
+    generation_feedback: Optional[str] = None
     eval_artifacts: Dict[str, Any] = field(default_factory=dict)
     generation_order: int = 0
     parent_program_id: Optional[str] = None
@@ -44,6 +45,7 @@ class ProgramRecord:
         status: str = "success",
         error_text: Optional[str] = None,
         reasoning: Optional[str] = None,
+        generation_feedback: Optional[str] = None,
         eval_artifacts: Optional[Dict[str, Any]] = None,
         generation_order: int = 0,
         parent_program_id: Optional[str] = None,
@@ -56,6 +58,7 @@ class ProgramRecord:
             metrics=metrics,
             error_text=error_text,
             reasoning=reasoning,
+            generation_feedback=generation_feedback,
             eval_artifacts=eval_artifacts or {},
             generation_order=generation_order,
             parent_program_id=parent_program_id,

@@ -146,6 +146,7 @@ class IdeaProgramEngine:
         results_root: Path = Path("results_idea_loop"),
         program_gen_prompt: Optional[Path] = None,
         compile_fix_prompt: Optional[Path] = None,
+        generation_feedback_prompt: Optional[Path] = None,
         model: str = "gpt-5.1",
         temperature: Optional[float] = 0.8,
         idea_iterations: int = 2,
@@ -184,6 +185,9 @@ class IdeaProgramEngine:
         base_prompt_dir = Path(__file__).parent / "prompts"
         self.program_prompt_path = program_gen_prompt or (base_prompt_dir / "program_generation.txt")
         self.compile_fix_prompt_path = compile_fix_prompt or (base_prompt_dir / "compile_fix.txt")
+        self.generation_feedback_prompt_path = (
+            generation_feedback_prompt or (base_prompt_dir / "generation_feedback.txt")
+        )
         self.eval_prompt_base_path = Path(eval_prompt) if eval_prompt else (base_prompt_dir / "eval_agent_prompt_base.txt")
         self.idea_prompt_base_path = Path(idea_prompt) if idea_prompt else (base_prompt_dir / "idea_agent_prompt_base.txt")
         self.eval_prompt_base_text = _read_text(self.eval_prompt_base_path)
@@ -401,6 +405,7 @@ class IdeaProgramEngine:
             "stderr",
             "traceback",
             "error",
+            "runs",
         )
         lines: List[str] = []
         for key in keys_of_interest:
@@ -410,6 +415,12 @@ class IdeaProgramEngine:
                 if len(trimmed) > 2000:
                     trimmed = trimmed[:2000] + "\n...[truncated]..."
                 lines.append(f"{key}: {trimmed}")
+            elif key == "runs" and val is not None:
+                try:
+                    blob = json.dumps(val, indent=2)[:2000]
+                    lines.append(f"{key}: {blob}")
+                except Exception:
+                    continue
         if not lines:
             try:
                 return json.dumps(artifacts, ensure_ascii=True)[:2000]
@@ -512,6 +523,41 @@ class IdeaProgramEngine:
         )
         code_path.write_text(extracted_code, encoding="utf-8")
 
+    def _log_generation_feedback(
+        self,
+        gen_dir: Path,
+        payload: Dict[str, Any],
+        response_text: str,
+    ) -> None:
+        """Persist the per-attempt feedback prompt/response."""
+
+        gen_dir.mkdir(parents=True, exist_ok=True)
+        log_path = gen_dir / "feedback.yaml"
+        messages = []
+        for msg in payload.get("messages", []):
+            if isinstance(msg, dict) and isinstance(msg.get("content"), str):
+                new_msg = dict(msg)
+                new_msg["content"] = _literal(msg["content"])
+                messages.append(new_msg)
+            else:
+                messages.append(msg)
+        log_payload = {
+            "model": payload.get("model"),
+            "temperature": payload.get("temperature"),
+            "reasoning_effort": payload.get("reasoning_effort"),
+            "messages": messages,
+            "response_text": _literal(response_text),
+        }
+        log_path.write_text(
+            yaml.safe_dump(
+                _literalize(log_payload),
+                sort_keys=False,
+                width=120,
+                default_flow_style=False,
+            ),
+            encoding="utf-8",
+        )
+
     def _generate_program_code(
         self,
         node: IdeaNode,
@@ -519,11 +565,17 @@ class IdeaProgramEngine:
         prior_attempts: List[ProgramRecord],
         iteration_dir: Path,
         generation_order: int,
+        feedback_history: Optional[List[str]] = None,
     ) -> Tuple[str, Path]:
         prompt_template = _read_text(self.program_prompt_path)
         code_summary_block = getattr(self.config, "code_summary", None) or "N/A"
         snippets = node.idea_payload.get("implementation_snippets") if node.idea_payload else []
         snippet_text = json.dumps(snippets, ensure_ascii=True) if snippets else "[]"
+        feedback_history = feedback_history or []
+        feedback_fmt = []
+        for idx, fb in enumerate(reversed(feedback_history[-3:]), start=1):
+            feedback_fmt.append(f"- Feedback {idx} (latest first): {fb}")
+        feedback_text = "\n".join(feedback_fmt) if feedback_fmt else "none"
 
         attempts_fmt: List[str] = []
         for rec in reversed(prior_attempts[-3:]):
@@ -562,6 +614,7 @@ class IdeaProgramEngine:
             prior_attempts=prior_attempts_text,
             best_program_code=best_program_block,
             code_summary=code_summary_block,
+            feedback_history=feedback_text,
         )
 
         payload = {
@@ -581,6 +634,57 @@ class IdeaProgramEngine:
         out_dir = iteration_dir / "program_generations" / f"gen_{generation_order}"
         self._log_program_generation(iteration_dir, generation_order, payload, text, code, out_dir)
         return code, out_dir
+
+    def _run_generation_feedback(
+        self,
+        node: IdeaNode,
+        program_record: ProgramRecord,
+        eval_context: Optional[Dict[str, Any]],
+        feedback_history: List[str],
+        gen_dir: Path,
+    ) -> Optional[str]:
+        """Run a one-shot feedback LLM to guide the next generation."""
+
+        prompt_template = _read_text(self.generation_feedback_prompt_path)
+        metrics_text = _format_metrics(program_record.metrics) if program_record.metrics else "n/a"
+        artifacts = program_record.eval_artifacts if isinstance(program_record.eval_artifacts, dict) else {}
+        if "runs" not in artifacts:
+            logger.warning("Generation feedback: 'runs' missing in artifacts for gen %s", program_record.generation_order)
+        artifacts_text = self._format_artifact_context(artifacts)
+        prior_fb = "\n".join([f"- {fb}" for fb in feedback_history[-3:]]) if feedback_history else "none"
+        code_summary_block = getattr(self.config, "code_summary", None) or "N/A"
+        prompt = prompt_template.format(
+            idea_summary=node.idea_summary,
+            eval_summary=(eval_context or {}).get("summary") or "n/a",
+            eval_hypothesis=(eval_context or {}).get("hypothesis") or "n/a",
+            eval_score=(eval_context or {}).get("score") if eval_context else "n/a",
+            metrics=metrics_text or "n/a",
+            artifacts=artifacts_text or "n/a",
+            prior_feedback=prior_fb,
+            code=program_record.code,
+            suffix=self.initial_program_path.suffix or ".py",
+            code_summary=code_summary_block,
+        )
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "You review eBPF attempts and suggest the next fix."},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        if self.temperature is not None and _supports_temperature(self.model):
+            payload["temperature"] = self.temperature
+        if self.model_supports_reasoning:
+            payload["reasoning_effort"] = "medium"
+
+        try:
+            resp = make_llm_call(payload)
+            text = _message_content_to_text(resp.choices[0].message.content)
+            self._log_generation_feedback(gen_dir, payload, text)
+            return text
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Generation feedback call failed; continuing without it: %s", exc)
+            return None
 
     async def _evaluate_with_repair(
         self,
@@ -812,9 +916,11 @@ class IdeaProgramEngine:
         node: IdeaNode,
         parent_best: ProgramRecord,
         iteration_dir: Path,
+        eval_context: Optional[Dict[str, Any]],
     ) -> List[ProgramRecord]:
         prior_attempts: List[ProgramRecord] = []
         generated: List[ProgramRecord] = []
+        feedback_history: List[str] = []
         for idx in range(self.programs_per_idea):
             code, gen_dir = self._generate_program_code(
                 node,
@@ -822,6 +928,7 @@ class IdeaProgramEngine:
                 prior_attempts or [parent_best],
                 iteration_dir,
                 idx,
+                feedback_history,
             )
             record = asyncio.run(
                 self._evaluate_with_repair(code, parent_best.id if parent_best else None, idx, gen_dir=gen_dir)
@@ -831,6 +938,20 @@ class IdeaProgramEngine:
                 node.programs.append(record.id)
                 prior_attempts.append(record)
                 generated.append(record)
+                # Only run feedback if there will be another generation in this iteration.
+                if idx < self.programs_per_idea - 1:
+                    feedback_text = self._run_generation_feedback(
+                        node=node,
+                        program_record=record,
+                        eval_context=eval_context,
+                        feedback_history=feedback_history,
+                        gen_dir=gen_dir,
+                    )
+                    if feedback_text:
+                        feedback_history.append(feedback_text)
+                        record.generation_feedback = feedback_text
+                        if isinstance(record.eval_artifacts, dict):
+                            record.eval_artifacts["generation_feedback"] = feedback_text
         return generated
 
     def _copy_exp_markers(self, generated: List[ProgramRecord], iteration_dir: Path) -> None:
@@ -923,7 +1044,7 @@ class IdeaProgramEngine:
 
             new_node = self._build_node_from_idea(idea_payload, idea_embedding, idea_iters, parent_node.id)
 
-            generated = self._generate_programs_for_node(new_node, parent_best, iteration_dir)
+            generated = self._generate_programs_for_node(new_node, parent_best, iteration_dir, eval_context)
 
             successful = [rec for rec in generated if rec.status == "success"]
             if successful:

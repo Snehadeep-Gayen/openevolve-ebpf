@@ -35,6 +35,8 @@ INPUT CONTEXT:
 {best_program_code}
 - Prior attempts (most recent first):
 {prior_attempts}
+- Recent per-attempt feedback (latest first):
+{feedback_history}
 
 OUTPUT:
 - Produce a single complete program file that satisfies the above constraints and implements the program idea.
