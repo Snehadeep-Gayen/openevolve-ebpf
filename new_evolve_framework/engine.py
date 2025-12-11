@@ -206,6 +206,7 @@ class IdeaProgramEngine:
         self.eval_model_supports_reasoning = _supports_reasoning(self.eval_model)
         self.idea_prompt_path: Optional[Path] = None
         self.eval_reasoning_effort = eval_reasoning_effort
+        self.rejected_ideas: List[str] = []
 
         # State
         self.nodes: Dict[str, IdeaNode] = {}
@@ -359,10 +360,12 @@ class IdeaProgramEngine:
 
         context_dict, context_text = self._build_prompt_context(best_program, eval_context)
         code_summary_block = getattr(self.config, "code_summary", None)
+        forbidden_block = "\n".join([f"- {s}" for s in self.rejected_ideas]) if self.rejected_ideas else "None"
         idea_prompt_text = (
             f"{self.idea_prompt_base_text.rstrip()}\n\n"
             f"Run context:\n{context_text}\n\n"
             f"Codebase summary:\n{code_summary_block or 'N/A'}\n\n"
+            f"Forbidden/rejected ideas so far:\n{forbidden_block}\n\n"
             f"Best program code:\n```{self.initial_program_path.suffix or '.py'}\n{best_program.code}\n```"
         )
         idea_payload = {
@@ -653,11 +656,20 @@ class IdeaProgramEngine:
         artifacts_text = self._format_artifact_context(artifacts)
         prior_fb = "\n".join([f"- {fb}" for fb in feedback_history[-3:]]) if feedback_history else "none"
         code_summary_block = getattr(self.config, "code_summary", None) or "N/A"
+        parent_eval_output = ""
+        if node.parent_id:
+            parent_node = self.nodes.get(node.parent_id)
+            if parent_node and parent_node.eval_output_path:
+                try:
+                    parent_eval_output = Path(parent_node.eval_output_path).read_text(encoding="utf-8")
+                except Exception:
+                    parent_eval_output = ""
         prompt = prompt_template.format(
             idea_summary=node.idea_summary,
             eval_summary=(eval_context or {}).get("summary") or "n/a",
             eval_hypothesis=(eval_context or {}).get("hypothesis") or "n/a",
             eval_score=(eval_context or {}).get("score") if eval_context else "n/a",
+            parent_eval_output=parent_eval_output or "n/a",
             metrics=metrics_text or "n/a",
             artifacts=artifacts_text or "n/a",
             prior_feedback=prior_fb,
@@ -776,7 +788,12 @@ class IdeaProgramEngine:
             raise RuntimeError("Unable to evaluate initial program successfully.")
 
         self.programs[record.id] = record
-        node = IdeaNode.create(idea_payload=None, idea_summary="Bootstrap node", parent_id=None)
+        node = IdeaNode.create(
+            idea_payload=None,
+            idea_summary="Bootstrap node",
+            parent_id=None,
+            artifacts_dir=self.results_root / "bootstrap",
+        )
         node.programs.append(record.id)
         node.update_best(record.id, _score_from_metrics(record.metrics))
         self.nodes[node.id] = node
@@ -795,12 +812,14 @@ class IdeaProgramEngine:
 
     def _run_eval_qa(
         self,
-        iteration_dir: Path,
         prompt_path: Path,
         parent_node: IdeaNode,
+        output_dir: Path,
+        mirror_dir: Optional[Path] = None,
     ) -> Optional[Dict[str, Any]]:
         """Run the RAG Q&A loop for the given parent node and persist results on the node."""
 
+        output_dir.mkdir(parents=True, exist_ok=True)
         # If this node already has eval context, reuse it and copy artifacts forward.
         if parent_node.eval_summary or parent_node.eval_hypothesis or parent_node.eval_score is not None:
             ctx = {
@@ -812,16 +831,22 @@ class IdeaProgramEngine:
                 try:
                     src = Path(parent_node.eval_output_path)
                     if src.exists():
-                        dst = iteration_dir / "eval_output.json"
+                        dst = output_dir / "eval_output.json"
                         if dst.resolve() != src.resolve():
                             shutil.copy2(src, dst)
                         self.eval_output_path = dst
+                        # Also mirror to iteration folder if requested
+                        if mirror_dir:
+                            mirror_dir.mkdir(parents=True, exist_ok=True)
+                            mirror_dst = mirror_dir / "eval_output.json"
+                            if mirror_dst.resolve() != dst.resolve():
+                                shutil.copy2(dst, mirror_dst)
                 except Exception as exc:  # pragma: no cover
                     logger.warning("Failed to copy cached eval_output.json: %s", exc)
             self.eval_context = ctx
             return ctx
 
-        output_path = iteration_dir / "eval_output.json"
+        output_path = output_dir / "eval_output.json"
         try:
             result = run_evaluation_qa_loop(
                 iteration_count=self.eval_iterations,
@@ -842,6 +867,11 @@ class IdeaProgramEngine:
             parent_node.eval_score = ctx["score"]
             parent_node.eval_output_path = str(self.eval_output_path) if self.eval_output_path else None
             try:
+                if mirror_dir:
+                    mirror_dir.mkdir(parents=True, exist_ok=True)
+                    mirror_dst = mirror_dir / output_path.name
+                    if mirror_dst.resolve() != output_path.resolve():
+                        shutil.copy2(output_path, mirror_dst)
                 if (
                     self.eval_output_path
                     and self.eval_output_path.exists()
@@ -886,6 +916,52 @@ class IdeaProgramEngine:
                 return True
         logger.info("Similarity check: candidate accepted (no close matches)")
         return False
+
+    def _is_novel_llm(self, idea_summary: str) -> Tuple[bool, Optional[str]]:
+        """LLM-based novelty check against all prior idea summaries; returns (is_novel, explanation)."""
+
+        if not self.nodes:
+            return True, None
+
+        prior_summaries = [n.idea_summary for n in self.nodes.values() if n.idea_summary]
+        if not prior_summaries:
+            return True, None
+
+        existing_block = "\n".join([f"{idx+1}. {s}" for idx, s in enumerate(prior_summaries)])
+        prompt = (
+            "You are a strict novelty judge. Given a candidate idea and a list of prior ideas, "
+            "decide if the candidate is genuinely novel (not overlapping or restating prior ideas). Focus on the architecture of the idea itself for the novelty, not the goals. A novel idea should lead to different system behavior."
+            "First state 'novel' or 'not novel', then a one-line explanation why.\n\n"
+            f"Prior ideas:\n{existing_block}\n\n"
+            f"Candidate idea:\n{idea_summary}\n\n"
+            "Answer with a single line: '<novel|not novel> — <reason>'."
+        )
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "You judge novelty of ideas."},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        if self.temperature is not None and _supports_temperature(self.model):
+            payload["temperature"] = self.temperature
+        if self.model_supports_reasoning:
+            payload["reasoning_effort"] = "low"
+
+        try:
+            resp = make_llm_call(payload)
+            raw = _message_content_to_text(resp.choices[0].message.content).strip()
+            text = raw.lower()
+            is_novel = text.startswith("novel")
+            logger.info(
+                "Novelty check via LLM: %s (response=%s)",
+                "novel" if is_novel else "not novel",
+                raw,
+            )
+            return is_novel, raw
+        except Exception as exc:  # pragma: no cover
+            logger.warning("LLM novelty check failed; treating as novel. Error: %s", exc)
+            return True, None
 
     def _select_parent_node(self) -> IdeaNode:
         return max(
@@ -1012,6 +1088,89 @@ class IdeaProgramEngine:
             except Exception as exc:  # pragma: no cover
                 logger.warning("Failed to copy %s: %s", source, exc)
 
+    def _materialize_best_generation(self) -> None:
+        """Create a best_generation directory with the top program/idea/eval artifacts."""
+
+        if not self.nodes:
+            logger.info("No nodes to materialize best generation.")
+            return
+
+        best_node = max(
+            self.nodes.values(),
+            key=lambda n: n.best_score or float("-inf"),
+        )
+        if not best_node.best_program_id or best_node.best_program_id not in self.programs:
+            logger.info("Best node missing program; skipping best_generation export.")
+            return
+
+        best_program = self.programs[best_node.best_program_id]
+        target_dir = self.results_root / "best_generation"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save program code
+        code_path = target_dir / f"best_program{self.initial_program_path.suffix or '.txt'}"
+        code_path.write_text(best_program.code, encoding="utf-8")
+
+        # Save program record
+        (target_dir / "program_record.json").write_text(
+            json.dumps(asdict(best_program), indent=2), encoding="utf-8"
+        )
+
+        # Save idea payload/summary
+        idea_payload_path = target_dir / "idea.yaml"
+        idea_payload = {
+            "idea_summary": best_node.idea_summary,
+            "idea_payload": best_node.idea_payload,
+            "parent_id": best_node.parent_id,
+            "eval_summary": best_node.eval_summary,
+            "eval_hypothesis": best_node.eval_hypothesis,
+            "eval_score": best_node.eval_score,
+        }
+        idea_payload_path.write_text(
+            yaml.safe_dump(_literalize(idea_payload), sort_keys=False, width=120, default_flow_style=False),
+            encoding="utf-8",
+        )
+
+        # Copy eval output if available
+        if best_node.eval_output_path:
+            try:
+                src = Path(best_node.eval_output_path)
+                if src.exists():
+                    shutil.copy2(src, target_dir / src.name)
+            except Exception as exc:  # pragma: no cover
+                logger.warning("Failed to copy eval output to best_generation: %s", exc)
+
+        # Copy exp-* artifacts if present in eval_artifacts paths
+        if isinstance(best_program.eval_artifacts, dict):
+            candidate_paths = [
+                best_program.eval_artifacts.get("raw_debug_path"),
+                best_program.eval_artifacts.get("debug_path"),
+            ]
+            for dbg in candidate_paths:
+                if not dbg:
+                    continue
+                dbg_path = Path(dbg)
+                try:
+                    exp_dir = None
+                    if "exp" in dbg_path.name.lower():
+                        exp_dir = dbg_path
+                    else:
+                        for ancestor in dbg_path.parents:
+                            if "exp" in ancestor.name.lower():
+                                exp_dir = ancestor
+                                break
+                    if exp_dir and exp_dir.exists():
+                        target = target_dir / exp_dir.name
+                        if exp_dir.is_dir():
+                            shutil.copytree(exp_dir, target, dirs_exist_ok=True)
+                            logger.info("Best generation: copied exp dir %s -> %s", exp_dir, target)
+                        else:
+                            shutil.copy2(exp_dir, target)
+                            logger.info("Best generation: copied exp file %s -> %s", exp_dir, target)
+                        break
+                except Exception as exc:  # pragma: no cover
+                    logger.warning("Best generation: failed to copy exp marker from %s: %s", dbg, exc)
+
     def run(self, iterations: int = 3) -> None:
         if not self.nodes:
             self._bootstrap_first_node()
@@ -1031,16 +1190,37 @@ class IdeaProgramEngine:
                 "score": parent_node.eval_score,
             }
             eval_prompt_path = self._write_eval_prompt(iteration_dir, parent_best, parent_eval_ctx)
-            eval_context = self._run_eval_qa(iteration_dir, eval_prompt_path, parent_node)
+            parent_output_dir = Path(parent_node.artifacts_dir) if parent_node.artifacts_dir else iteration_dir
+            eval_context = self._run_eval_qa(eval_prompt_path, parent_node, parent_output_dir, mirror_dir=iteration_dir)
             idea_prompt_path = self._write_idea_prompt(iteration_dir, parent_best, eval_context)
 
-            idea_payload, idea_iters = self._generate_new_idea(
-                parent_node, eval_context, idea_prompt_path
-            )
-            idea_summary = _extract_idea_summary(idea_payload)
-            idea_embedding = self.similarity.embed(idea_summary)
-            if self._similar_to_existing(idea_embedding):
-                logger.info("New idea is too similar; reusing summary for logging but continuing anyway.")
+            max_novel_retries = 3
+            attempt = 0
+            while True:
+                idea_payload, idea_iters = self._generate_new_idea(
+                    parent_node, eval_context, idea_prompt_path
+                )
+                idea_summary = _extract_idea_summary(idea_payload)
+                idea_embedding = self.similarity.embed(idea_summary)
+                is_novel, novelty_reason = self._is_novel_llm(idea_summary)
+                if is_novel:
+                    logger.info(
+                        "Novelty check passed for idea: %s | reason: %s",
+                        idea_summary,
+                        novelty_reason or "n/a",
+                    )
+                    break
+                logger.info(
+                    "Idea judged not novel; regenerating with forbidden list. Summary: %s | reason: %s",
+                    idea_summary,
+                    novelty_reason or "n/a",
+                )
+                self.rejected_ideas.append(idea_summary)
+                attempt += 1
+                if attempt >= max_novel_retries:
+                    logger.warning("Exceeded novelty retries; proceeding with last idea despite similarity.")
+                    break
+                idea_prompt_path = self._write_idea_prompt(iteration_dir, parent_best, eval_context)
 
             new_node = self._build_node_from_idea(idea_payload, idea_embedding, idea_iters, parent_node.id)
 
@@ -1066,3 +1246,6 @@ class IdeaProgramEngine:
                 len(generated),
                 new_node.best_score,
             )
+
+        # Materialize best overall artifacts at the end of the run.
+        self._materialize_best_generation()
