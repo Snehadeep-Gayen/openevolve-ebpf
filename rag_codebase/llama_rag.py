@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import dotenv
 import os
 import re
+import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple, Any, Dict, List
 
 from llama_index.core import (
     Settings,
@@ -30,9 +33,8 @@ class LanguageIngestionConfig:
     explicit_files: Optional[list[Path]] = None
 
 
-# REPO_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = Path("/home/benny/evolve_agent/agentic-ebpf/pebble-server")
-
+dotenv.load_dotenv('.env', override=True)
+REPO_ROOT = Path(os.environ.get('REPO_ROOT'))
 
 # Toggle this flag to switch between language-aware chunking and plain token splitting.
 USE_CODE_SPLITTER = True
@@ -252,7 +254,7 @@ def extract_symbol_name(text: str, language: str) -> Optional[str]:
     return None
 
 
-def enrich_node_metadata(node, doc_metadata: dict, language: str) -> None:
+def enrich_node_metadata(node: Any, doc_metadata: Dict, language: str) -> None:
     """
     Copy per-file metadata onto nodes and annotate source paths and symbols.
 
@@ -360,6 +362,113 @@ def build_index(
     index.storage_context.persist(persist_dir=str(persist_dir))
 
 
+def delete_old_files(persist_dir: Path, filenames: List[str]) -> int:
+    """
+    Removes the supplied files from the vector store
+    
+    :param persist_dir: The directory at which vector store is present
+    :type persist_dir: Path
+    :param filenames: list of relative file paths wrt REPO_ROOT
+    :type filenames: List[str]
+    :return: number of nodes changed (check if zero for no change)
+    :rtype: int
+    """
+    print('Filename is being deleted from the vector database')
+    if not persist_dir.exists():
+        raise FileNotFoundError(
+            f"Index directory {persist_dir} not found. Run the 'index' command first."
+        )
+    ctx = StorageContext.from_defaults(persist_dir=str(persist_dir))
+    index = load_index_from_storage(ctx)
+    nodes_deleted = 0
+    for node_id, node in ctx.docstore.docs.items():
+        meta = node.metadata or {}
+        if meta.get("relative_path") in filenames:
+            index.delete_nodes(node_ids=[node_id])
+            nodes_deleted += 1
+            
+    index.storage_context.persist(persist_dir=str(persist_dir))
+    return nodes_deleted
+
+
+def renew_files(persist_dir: Path, filenames: List[str], file_language: Dict[str, str]) -> int:
+    delete_old_files(persist_dir, filenames)
+    
+    # Resolve files to absolute paths rooted at REPO_ROOT
+    resolved_files: list[Path] = []
+    for fname in filenames:
+        path = Path(fname)
+        if not path.is_absolute():
+            path = REPO_ROOT / path
+        if not path.exists():
+            print(f"[renew_files] Skipping missing file: {path}")
+            continue
+        resolved_files.append(path)
+
+    if not resolved_files:
+        print("[renew_files] No valid files supplied; nothing to refresh.")
+        return 0
+
+    # Reload index/docstore to insert new nodes after deletion
+    storage_context = StorageContext.from_defaults(persist_dir=str(persist_dir))
+    index = load_index_from_storage(storage_context)
+
+    def _language_for(path: Path) -> str:
+        try:
+            rel = str(path.resolve().relative_to(REPO_ROOT))
+        except Exception:
+            rel = path.name
+        return file_language.get(rel) or file_language.get(path.name) or "unknown"
+
+    # Rebuild reader with resolved paths to ensure metadata is correct
+    reader = SimpleDirectoryReader(
+        input_files=[str(p) for p in resolved_files],
+        file_metadata=lambda p: build_file_metadata(Path(p), _language_for(Path(p))),
+    )
+    docs = reader.load_data()
+
+    # Normalize metadata (especially language) for each document
+    for doc in docs:
+        if doc.metadata is None:
+            doc.metadata = {}
+        file_path = Path(doc.metadata.get("file_path", ""))
+        doc.metadata["language"] = _language_for(file_path) if file_path.exists() else "unknown"
+
+    nodes_added = 0
+    if USE_CODE_SPLITTER:
+        for doc in docs:
+            language = doc.metadata.get("language", "unknown")
+            splitter = CodeSplitter(
+                language=language,
+                chunk_lines=DEFAULT_CODE_CHUNK_LINES,
+                chunk_lines_overlap=DEFAULT_CODE_CHUNK_OVERLAP_LINES,
+            )
+            pipeline = IngestionPipeline(transformations=[splitter])
+            nodes = pipeline.run(documents=[doc])
+            doc_meta_map = {doc.doc_id: doc.metadata}
+            for node in nodes:
+                enrich_node_metadata(node, doc_meta_map, language)
+            index.insert_nodes(nodes)
+            nodes_added += len(nodes)
+    else:
+        combined_meta = {doc.doc_id: doc.metadata for doc in docs}
+        splitter = TokenTextSplitter(
+            chunk_size=DEFAULT_TOKEN_CHUNK_SIZE,
+            chunk_overlap=DEFAULT_TOKEN_CHUNK_OVERLAP,
+        )
+        pipeline = IngestionPipeline(transformations=[splitter])
+        nodes = pipeline.run(documents=docs)
+        for node in nodes:
+            language = combined_meta.get(node.ref_doc_id, {}).get("language", "unknown")
+            enrich_node_metadata(node, combined_meta, language)
+        index.insert_nodes(nodes)
+        nodes_added += len(nodes)
+
+    # Persist updated store
+    storage_context.persist(persist_dir=str(persist_dir))
+    return nodes_added
+
+
 def query_index(persist_dir: Path, question: str, top_k: int = 6) -> str:
     """
     Load a persisted index and answer a natural-language question.
@@ -390,7 +499,7 @@ def query_index(persist_dir: Path, question: str, top_k: int = 6) -> str:
     return str(response)
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     """Create the CLI parser for the indexing/query commands."""
     parser = argparse.ArgumentParser(
         description="Mini RAG app that indexes a codebase with LlamaIndex."
@@ -422,14 +531,58 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser("index", help="Index the given code directory.")
 
     query_parser = subparsers.add_parser("query", help="Query the existing index.")
-    query_parser.add_argument("question", type=str, help="Question about the codebase.")
+    query_parser.add_argument("question", nargs="?", type=str, help="Question about the codebase.")
+    query_parser.add_argument(
+        "--question",
+        dest="question_opt",
+        help="Question about the codebase (alternative to positional).",
+    )
     query_parser.add_argument(
         "--top-k",
         type=int,
         default=6,
         help="How many similar chunks to retrieve when answering.",
     )
-    return parser.parse_args()
+
+    delete_parser = subparsers.add_parser("delete", help="Delete nodes for files.")
+    delete_parser.add_argument(
+        "files",
+        nargs="+",
+        help="Relative file paths (from REPO_ROOT) to delete from the index.",
+    )
+
+    renew_parser = subparsers.add_parser("renew", help="Delete then re-add nodes for files.")
+    renew_parser.add_argument(
+        "files",
+        nargs="+",
+        help="Relative file paths (from REPO_ROOT) to refresh in the index.",
+    )
+    renew_parser.add_argument(
+        "--file-language",
+        action="append",
+        default=[],
+        metavar="PATH:LANG",
+        help="Optional mapping (repeatable). Format: path:language. Relative paths are matched against file metadata.",
+    )
+    renew_parser.add_argument(
+        "--default-language",
+        default=None,
+        help="Fallback language to use for any file without an explicit mapping.",
+    )
+    commands = {"index", "query", "delete", "renew"}
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    # If the user put the command at the end (e.g., flags then "query"), move it to the front.
+    if argv and argv[-1] in commands and argv[0] not in commands:
+        argv = [argv[-1]] + argv[:-1]
+
+    try:
+        return parser.parse_args(argv)
+    except SystemExit:
+        # Fallback: if no command but a question flag is present, assume query.
+        if "--question" in argv or "-q" in argv:
+            return parser.parse_args(["query"] + argv)
+        raise
 
 
 def main() -> None:
@@ -455,12 +608,31 @@ def main() -> None:
             f"({mode}, chunk_size={args.chunk_size} {unit}, overlap={args.chunk_overlap})."
         )
     elif args.command == "query":
+        question_text = getattr(args, "question_opt", None) or args.question
+        if not question_text:
+            raise ValueError("A question is required. Provide it positionally or via --question.")
         answer = query_index(
             persist_dir=args.persist_dir,
-            question=args.question,
+            question=question_text,
             top_k=args.top_k,
         )
         print(answer)
+    elif args.command == "delete":
+        deleted = delete_old_files(args.persist_dir, args.files)
+        print(f"Deleted {deleted} node(s) for files: {', '.join(args.files)}")
+    elif args.command == "renew":
+        mapping: Dict[str, str] = {}
+        for entry in args.file_language:
+            if ":" not in entry:
+                print(f"[renew] Ignoring malformed mapping: {entry} (expected path:lang)")
+                continue
+            path, lang = entry.split(":", 1)
+            mapping[path] = lang
+        if args.default_language:
+            for path in args.files:
+                mapping.setdefault(path, args.default_language)
+        added = renew_files(args.persist_dir, args.files, mapping)
+        print(f"Refreshed {added} node(s) for files: {', '.join(args.files)}")
     else:
         raise ValueError(f"Unknown command: {args.command}")
 
